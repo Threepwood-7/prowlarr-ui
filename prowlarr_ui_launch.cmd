@@ -2,4 +2,4 @@
 
 CD /D %~dp0
 
-START "" PYTHONW.EXE main.py
+START "" PYTHONW.EXE prowlarr_ui.py
