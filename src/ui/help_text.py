@@ -27,9 +27,9 @@ HELP_HTML = """\
 <tr><td><b>C</b></td><td>Copy release title to clipboard</td></tr>
 <tr><td><b>G</b></td><td>Open web search for the title</td></tr>
 <tr><td><b>P</b></td><td>Play video file found by Everything</td></tr>
-<tr><td><b>F2</b></td><td>Run custom_command_F2 (config.toml)</td></tr>
-<tr><td><b>F3</b></td><td>Run custom_command_F3 (config.toml)</td></tr>
-<tr><td><b>F4</b></td><td>Run custom_command_F4 (config.toml)</td></tr>
+<tr><td><b>F2</b></td><td>Run custom_command_F2 (prowlarr_ui_config.toml)</td></tr>
+<tr><td><b>F3</b></td><td>Run custom_command_F3 (prowlarr_ui_config.toml)</td></tr>
+<tr><td><b>F4</b></td><td>Run custom_command_F4 (prowlarr_ui_config.toml)</td></tr>
 <tr><td><b>Tab</b></td><td>Jump to next title group</td></tr>
 <tr><td><b>Shift+Tab</b></td><td>Jump to previous title group</td></tr>
 <tr><td><b>Ctrl+A</b></td><td>Select all visible rows</td></tr>

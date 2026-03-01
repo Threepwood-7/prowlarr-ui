@@ -2653,7 +2653,7 @@ class MainWindow(QMainWindow):
                 self._run_custom_command(event.key(), cmd)
             else:
                 key_name = {Qt.Key_F2: "F2", Qt.Key_F3: "F3", Qt.Key_F4: "F4"}.get(event.key(), "?")
-                self.status_label.setText(f"No custom command configured for {key_name} (set custom_command_{key_name} in config.toml)")
+                self.status_label.setText(f"No custom command configured for {key_name} (set custom_command_{key_name} in config)")
             event.accept()
             return
 

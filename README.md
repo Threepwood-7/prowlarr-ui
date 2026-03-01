@@ -37,8 +37,6 @@ Built with PySide6 (Qt for Python).
 1. Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/USERNAME/prowlarr-search-client.git
-cd prowlarr-search-client
 pip install -r requirements.txt
 ```
 
@@ -48,7 +46,7 @@ pip install -r requirements.txt
 cp prowlarr_ui_config_example.toml prowlarr_ui_config.toml
 ```
 
-3. Edit `config.toml` with your Prowlarr API key (found in Prowlarr under *Settings > General*):
+3. Edit `prowlarr_ui_config.toml` with your Prowlarr API key (found in Prowlarr under *Settings > General*):
 
 ```toml
 [prowlarr]
