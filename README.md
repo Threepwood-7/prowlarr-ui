@@ -45,7 +45,7 @@ pip install -r requirements.txt
 2. Copy the example config and add your Prowlarr credentials:
 
 ```bash
-cp config_example.toml config.toml
+cp prowlarr_ui_config_example.toml prowlarr_ui_config.toml
 ```
 
 3. Edit `config.toml` with your Prowlarr API key (found in Prowlarr under *Settings > General*):
@@ -92,7 +92,7 @@ These work when the results table is focused:
 
 ## Configuration
 
-All settings live in `config.toml`. See [`config_example.toml`](config_example.toml) for the full template.
+All settings live in `prowlarr_ui_config.toml`. See [`prowlarr_ui_config_example.toml`](prowlarr_ui_config_example.toml) for the full template.
 
 ### Key Settings
 
@@ -156,7 +156,7 @@ src/
     formatters.py              Size and age formatting utilities
     logging_config.py          Rotating file log setup
     quality_parser.py          Resolution/source/codec extraction from titles
-config_example.toml            Configuration template
+prowlarr_ui_config_example.toml            Configuration template
 test_integrations.py           Prowlarr + Everything connectivity tests
 ```
 

@@ -64,7 +64,7 @@ def test_prowlarr_api(config):
     api_key = prowlarr_config.get('api_key', '')
 
     if not api_key or api_key == 'YOUR_API_KEY_HERE':
-        print_test("API Key Check", False, "API key not configured in config.toml")
+        print_test("API Key Check", False, "API key not configured in config")
         return False
 
     print_test("API Key Check", True, f"Key configured: {api_key[:8]}...")
@@ -195,16 +195,16 @@ def main():
         print("Continuing without colors...\n")
 
     print(f"{Colors.BOLD}Prowlarr UI Integration Test Suite{Colors.RESET}")
-    print(f"Testing all integration methods with config.toml")
+    print(f"Testing all integration methods with prowlarr_ui_config.toml")
 
     # Load config
     print_header("Configuration")
     try:
         config = load_config()
-        print_test("Load config.toml", True, "Configuration loaded successfully")
+        print_test("Load prowlarr_ui_config.toml", True, "Configuration loaded successfully")
     except Exception as e:
-        print_test("Load config.toml", False, str(e))
-        print(f"\n{Colors.RED}Cannot proceed without valid config.toml{Colors.RESET}")
+        print_test("Load prowlarr_ui_config.toml", False, str(e))
+        print(f"\n{Colors.RED}Cannot proceed without valid prowlarr_ui_config.toml{Colors.RESET}")
         return 1
 
     # Run all tests

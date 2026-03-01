@@ -8,7 +8,7 @@ from typing import Dict
 logger = logging.getLogger(__name__)
 
 # Anchor config path to project root (two levels up from src/utils/)
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'config.toml')
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'prowlarr_ui_config.toml')
 
 
 def get_default_config() -> Dict:
@@ -63,7 +63,7 @@ def validate_config(config: Dict) -> list:
     prowlarr = config.get('prowlarr', {})
     api_key = prowlarr.get('api_key', '')
     if not api_key or api_key == 'YOUR_API_KEY_HERE':
-        warnings.append("Prowlarr API key is not set - update config.toml")
+        warnings.append("Prowlarr API key is not set - update prowlarr_ui_config.toml")
 
     host = prowlarr.get('host', '')
     if host and not (host.startswith('http://') or host.startswith('https://')):

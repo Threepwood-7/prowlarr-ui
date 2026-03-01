@@ -40,7 +40,7 @@ HELP_HTML = """\
 </table>
 
 <h4>Custom Commands (F2/F3/F4)</h4>
-<p>Configure in <code>[settings]</code> section of config.toml:</p>
+<p>Configure in <code>[settings]</code> section of prowlarr_ui_config.toml:</p>
 <pre>custom_command_F2 = 'my_script.bat "{title}" "{video}"'</pre>
 <p>Placeholders: <b>{title}</b> = release title, <b>{video}</b> = video file path
 from Everything (or empty)</p>
