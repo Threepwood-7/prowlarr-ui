@@ -1,5 +1,6 @@
 # Project
 config.toml
+prowlarr_ui_config.toml
 *.log
 .everything_sdk/
 cleanup.ps1
