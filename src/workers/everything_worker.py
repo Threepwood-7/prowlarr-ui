@@ -70,6 +70,11 @@ class EverythingCheckWorker(QThread):
                     self.batch_ready.emit(batch)
                 except Exception as e:
                     logger.error(f"Failed to emit final batch signal: {e}")
+            # Always emit a terminal progress state so UI can display completion accurately.
+            try:
+                self.progress.emit(total, total)
+            except Exception as e:
+                logger.error(f"Failed to emit final progress signal: {e}")
         except Exception as e:
             logger.error(f"Everything check error: {e}")
         finally:

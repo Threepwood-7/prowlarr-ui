@@ -18,7 +18,7 @@ class DownloadWorker(QThread):
 
     # Qt signals for thread communication
     progress = Signal(int, int, str)        # (current, total, title)
-    item_downloaded = Signal(str, bool)     # (guid, success)
+    item_downloaded = Signal(str, int, bool)     # (guid, indexer_id, success)
     queue_done = Signal()                   # All downloads complete (avoid QThread.finished clash)
 
     def __init__(self, client: ProwlarrClient, items: List[Dict]):
@@ -30,12 +30,33 @@ class DownloadWorker(QThread):
         super().__init__()
         self.client = client
         self._lock = threading.Lock()
-        self.items = list(items)
+        self._queued_keys = set()
+        self.items = []
+        # Normalize initial queue to unique items so duplicates are never processed twice.
+        for item in items:
+            key = self._item_key(item)
+            if key in self._queued_keys:
+                continue
+            self._queued_keys.add(key)
+            self.items.append(item)
 
-    def add_items(self, new_items: List[Dict]):
-        """Thread-safe append of new items to the queue while running."""
+    @staticmethod
+    def _item_key(item: Dict):
+        """Stable queue identity for deduplication."""
+        return item.get('guid'), item.get('indexer_id')
+
+    def add_items(self, new_items: List[Dict]) -> List[Dict]:
+        """Thread-safe append of unique new items to the queue while running."""
+        added = []
         with self._lock:
-            self.items.extend(new_items)
+            for item in new_items:
+                key = self._item_key(item)
+                if key in self._queued_keys:
+                    continue
+                self._queued_keys.add(key)
+                self.items.append(item)
+                added.append(item)
+        return added
 
     def run(self):
         """Process download queue sequentially, picking up newly added items"""
@@ -62,7 +83,8 @@ class DownloadWorker(QThread):
             try:
                 success = self.client.download(guid, indexer_id)
                 try:
-                    self.item_downloaded.emit(guid, success)
+                    # Emit composite identity to disambiguate duplicate GUIDs across indexers.
+                    self.item_downloaded.emit(guid, int(indexer_id), success)
                 except Exception as e:
                     logger.error(f"Failed to emit item_downloaded signal: {e}")
                 if success:
@@ -72,7 +94,7 @@ class DownloadWorker(QThread):
             except Exception as e:
                 logger.error(f"Download {idx + 1}/{total} error: {title} - {e}")
                 try:
-                    self.item_downloaded.emit(guid, False)
+                    self.item_downloaded.emit(guid, int(indexer_id), False)
                 except Exception as emit_error:
                     logger.error(f"Failed to emit error item_downloaded signal: {emit_error}")
 

@@ -194,9 +194,11 @@ class MainWindow(QMainWindow):
         self._video_paths = {}  # title -> video file path from Everything
         self._search_generation = 0  # Incremented on each new search, used to invalidate stale timers
         self._everything_check_generation = 0  # Generation when Everything check started
-        self._downloaded_guids = set()  # GUIDs of downloaded items, persists across re-displays
+        self._pending_everything_check_generation = None  # Deferred generation to run after an in-flight check ends
+        # Composite key avoids collisions when two indexers expose the same GUID.
+        self._downloaded_release_keys = set()  # {(guid, indexer_id), ...}
         self._downloaded_title_keys = set()  # Title keys for Everything recheck scheduling
-        self._guid_to_row = {}  # GUID -> row cache for download progress tracking
+        self._release_key_to_row = {}  # (guid, indexer_id) -> row cache for download progress tracking
 
         # Multi-page fetch state
         self._load_all_active = False
@@ -1108,12 +1110,21 @@ class MainWindow(QMainWindow):
             return
         self.start_search()
 
+    def _is_download_queue_active(self) -> bool:
+        """Central gate to prevent search-state mutations while downloads are running."""
+        return bool(self.download_worker and self.download_worker.isRunning())
+
     @safe_slot
     def start_search(self):
         """Initiate a new search"""
         query = self.query_input.text().strip()
         if not query:
             self.status_label.setText("Please enter a search query")
+            return
+
+        # Keep table/model identity stable until the queue finishes processing items.
+        if self._is_download_queue_active():
+            self.status_label.setText("Cannot start a new search while downloads are running")
             return
 
         if not self.prowlarr:
@@ -1154,7 +1165,7 @@ class MainWindow(QMainWindow):
         self.current_results = []
         self.current_offset = 0
         self._video_paths = {}
-        self._downloaded_guids = set()
+        self._downloaded_release_keys = set()
         self._search_generation += 1
 
         # Reset page number to 1 for new search
@@ -1184,6 +1195,11 @@ class MainWindow(QMainWindow):
     @safe_slot
     def start_load_all_pages(self):
         """Start fetching all pages of results sequentially"""
+        # Prevent Load All from clearing/replacing rows while the download queue is in flight.
+        if self._is_download_queue_active():
+            self.status_label.setText("Cannot load pages while downloads are running")
+            return
+
         # If Load All is active, cancel it
         if self._load_all_active:
             self._load_all_active = False
@@ -1221,7 +1237,7 @@ class MainWindow(QMainWindow):
         self.current_results = []
         self.current_offset = 0
         self._video_paths = {}
-        self._downloaded_guids = set()
+        self._downloaded_release_keys = set()
         self._search_generation += 1
 
         # Disable UI
@@ -1272,6 +1288,11 @@ class MainWindow(QMainWindow):
 
     def fetch_page(self, page_number: int):
         """Fetch a specific page of results"""
+        # Guard against row remapping races with active background downloads.
+        if self._is_download_queue_active():
+            self.status_label.setText("Cannot change page while downloads are running")
+            return
+
         query = self.query_input.text().strip()
         if not query:
             return
@@ -1469,13 +1490,14 @@ class MainWindow(QMainWindow):
         self.log("Applying default sort: Title ASC, then Indexer DESC, then Age ASC...")
 
         # Sort using cached tuple keys (avoids redundant .lower() calls)
-        # Key: (title_lower ASC, indexer_lower_inverted DESC, -age ASC)
+        # Key: (title_lower ASC, indexer_lower_inverted DESC, age ASC)
         def sort_key(r):
             return (
                 r.get("title", "").lower(),
                 # Invert string for descending: negate each char ordinal
                 [-ord(c) for c in r.get("indexer", "").lower()],
-                -(r.get("age") or 0),
+                # Keep age positive so smaller day-counts sort first (true ASC).
+                (r.get("age") or 0),
             )
 
         self.current_results.sort(key=sort_key)
@@ -1500,9 +1522,14 @@ class MainWindow(QMainWindow):
         if not self.everything or not self.current_results:
             return
 
-        # Skip if a check is already running
+        # Defer only when the running worker belongs to an older search generation.
         if self.everything_check_worker and self.everything_check_worker.isRunning():
+            if self._everything_check_generation != self._search_generation:
+                self._pending_everything_check_generation = self._search_generation
             return
+
+        # We are starting now, so clear any stale deferred request marker.
+        self._pending_everything_check_generation = None
 
         # Create and start new worker (tag with generation for stale batch detection)
         self._everything_check_generation = self._search_generation
@@ -1583,6 +1610,13 @@ class MainWindow(QMainWindow):
         logger.info("Everything check completed")
         # Re-apply all filters to catch any changes made during the check
         self.apply_result_filters()
+
+        # If a newer generation requested a check while this worker was active, run it now.
+        pending_gen = self._pending_everything_check_generation
+        if pending_gen is not None:
+            self._pending_everything_check_generation = None
+            if pending_gen == self._search_generation:
+                self.start_everything_check()
 
     @safe_slot
     def on_sort_changed(self, logical_index: int):
@@ -1739,21 +1773,30 @@ class MainWindow(QMainWindow):
         for i, result in enumerate(recheck_results):
             recheck_title_map[i] = result["title"]
 
+        # Snapshot every current row for each title so duplicate titles are all updated.
+        title_to_rows = {}
+        for r in range(self.results_table.rowCount()):
+            item = self.results_table.item(r, self.COL_TITLE)
+            if not item:
+                continue
+            title_to_rows.setdefault(item.text(), []).append(r)
+
         # Remap worker row indices to actual table rows by title lookup (sort-safe)
         def on_recheck_batch(batch):
             try:
                 remapped = []
+                seen_rows = set()
                 for idx, results in batch:
                     title = recheck_title_map.get(idx)
                     if title is None:
                         logger.warning(f"Recheck batch index {idx} not in title map")
                         continue
-                    # Find current row by title (immune to re-sorting)
-                    for r in range(self.results_table.rowCount()):
-                        item = self.results_table.item(r, self.COL_TITLE)
-                        if item and item.text() == title:
-                            remapped.append((r, results))
-                            break
+                    # Update all rows sharing the same title, not just the first one.
+                    for r in title_to_rows.get(title, []):
+                        if r in seen_rows:
+                            continue
+                        remapped.append((r, results))
+                        seen_rows.add(r)
                 if remapped:
                     self.on_everything_batch_ready(remapped)
             except Exception as e:
@@ -1906,7 +1949,9 @@ class MainWindow(QMainWindow):
             # Apply background color to row (same color for same title group)
             # Re-apply downloaded state (dark red text) if GUID was previously downloaded
             guid = result.get("guid")
-            is_downloaded = guid and guid in self._downloaded_guids
+            indexer_id = result.get("indexerId")
+            release_key = (guid, indexer_id)
+            is_downloaded = guid is not None and indexer_id is not None and release_key in self._downloaded_release_keys
             for col in range(self.COL_DOWNLOAD):  # Don't color button column
                 item = self.results_table.item(row, col)
                 if item:
@@ -1922,7 +1967,8 @@ class MainWindow(QMainWindow):
         guid = button.property("guid")
         indexer_id = button.property("indexerId")
         title = button.property("title")
-        if not guid or not indexer_id:
+        # Accept indexer_id=0 as valid; only reject missing id or empty guid.
+        if guid in (None, "") or indexer_id is None:
             return None
         return {"guid": guid, "indexer_id": indexer_id, "title": title}
 
@@ -1942,7 +1988,8 @@ class MainWindow(QMainWindow):
         if not item:
             return
         # Skip if already downloaded
-        if item["guid"] in self._downloaded_guids:
+        release_key = (item["guid"], item["indexer_id"])
+        if release_key in self._downloaded_release_keys:
             self.status_label.setText(f"Already downloaded: {item.get('title', 'Unknown')}")
             return
         self.start_download_queue([item])
@@ -1971,8 +2018,10 @@ class MainWindow(QMainWindow):
                 continue
             # Skip already-downloaded rows using the authoritative GUID set
             btn = self.results_table.cellWidget(row, self.COL_DOWNLOAD)
-            if btn and btn.property("guid") in self._downloaded_guids:
-                continue
+            if btn:
+                release_key = (btn.property("guid"), btn.property("indexerId"))
+                if release_key in self._downloaded_release_keys:
+                    continue
             item = self._collect_row_download_item(row)
             if item:
                 items.append(item)
@@ -2026,20 +2075,37 @@ class MainWindow(QMainWindow):
             self.status_label.setText("Prowlarr client not initialized")
             return
 
+        # Normalize this request to unique release keys so progress totals stay accurate.
+        deduped_items = []
+        seen_keys = set()
+        for item in items:
+            key = (item.get("guid"), item.get("indexer_id"))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped_items.append(item)
+        items = deduped_items
+        if not items:
+            self.status_label.setText("No new items to queue")
+            return
+
         # If a download is already running, append new items to the existing queue
         if self.download_worker and self.download_worker.isRunning():
-            added = len(items)
-            self.download_worker.add_items(items)
+            added_items = self.download_worker.add_items(items)
+            added = len(added_items)
+            if added == 0:
+                self.status_label.setText("All selected items are already queued")
+                return
 
             # Update progress bar maximum to include new items
             self.download_progress.setMaximum(self.download_progress.maximum() + added)
 
             # Extend GUID → row mapping for new items
-            for item in items:
+            for item in added_items:
                 for r in range(self.results_table.rowCount()):
                     btn = self.results_table.cellWidget(r, self.COL_DOWNLOAD)
-                    if btn and btn.property("guid") == item["guid"]:
-                        self._guid_to_row[item["guid"]] = r
+                    if btn and btn.property("guid") == item["guid"] and btn.property("indexerId") == item["indexer_id"]:
+                        self._release_key_to_row[(item["guid"], item["indexer_id"])] = r
                         break
 
             self.log(f"Added {added} item(s) to download queue")
@@ -2064,12 +2130,12 @@ class MainWindow(QMainWindow):
         self._downloaded_title_keys = set()
 
         # Build GUID → row mapping for sort-safe row lookup
-        self._guid_to_row = {}
+        self._release_key_to_row = {}
         for item in items:
             for r in range(self.results_table.rowCount()):
                 btn = self.results_table.cellWidget(r, self.COL_DOWNLOAD)
-                if btn and btn.property("guid") == item["guid"]:
-                    self._guid_to_row[item["guid"]] = r
+                if btn and btn.property("guid") == item["guid"] and btn.property("indexerId") == item["indexer_id"]:
+                    self._release_key_to_row[(item["guid"], item["indexer_id"])] = r
                     break
 
         # Create and start worker
@@ -2094,27 +2160,28 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(current)
         self.status_label.setText(f"Downloading {current}/{total} [ {title} ]")
 
-    def _find_row_by_guid(self, guid: str) -> int:
-        """Find table row by GUID, looking up cached mapping first then scanning"""
-        row = self._guid_to_row.get(guid, -1)
+    def _find_row_by_release_key(self, guid: str, indexer_id: int) -> int:
+        """Find table row by (guid, indexer_id), using cached mapping first then scanning."""
+        release_key = (guid, indexer_id)
+        row = self._release_key_to_row.get(release_key, -1)
         if row >= 0:
             btn = self.results_table.cellWidget(row, self.COL_DOWNLOAD)
-            if btn and btn.property("guid") == guid:
+            if btn and btn.property("guid") == guid and btn.property("indexerId") == indexer_id:
                 return row
-        # Fallback: scan table (handles post-sort row changes)
+        # Fallback: scan table (handles post-sort row changes).
         for r in range(self.results_table.rowCount()):
             btn = self.results_table.cellWidget(r, self.COL_DOWNLOAD)
-            if btn and btn.property("guid") == guid:
-                self._guid_to_row[guid] = r
+            if btn and btn.property("guid") == guid and btn.property("indexerId") == indexer_id:
+                self._release_key_to_row[release_key] = r
                 return r
         return -1
 
     @safe_slot
-    def on_item_downloaded(self, guid: str, success: bool):
-        """Handle individual item download result, identified by GUID"""
-        row = self._find_row_by_guid(guid)
+    def on_item_downloaded(self, guid: str, indexer_id: int, success: bool):
+        """Handle individual item download result, identified by (guid, indexer_id)."""
+        row = self._find_row_by_release_key(guid, indexer_id)
         if row < 0:
-            self.log(f"Download result for unknown GUID: {guid}")
+            self.log(f"Download result for unknown release key: ({guid}, {indexer_id})")
             return
 
         button = self.results_table.cellWidget(row, self.COL_DOWNLOAD)
@@ -2127,7 +2194,8 @@ class MainWindow(QMainWindow):
         if success:
             self.log(f"Downloaded: {title}")
             self._write_download_history(title, indexer, True)
-            self._downloaded_guids.add(guid)
+            release_key = (guid, indexer_id)
+            self._downloaded_release_keys.add(release_key)
             # Make row text dark red to indicate downloaded
             for col in range(self.COL_DOWNLOAD):
                 item = self.results_table.item(row, col)
@@ -2227,18 +2295,28 @@ class MainWindow(QMainWindow):
     @safe_slot
     def update_download_button_states(self):
         """Enable/disable download buttons based on current table state and selection"""
+        def is_row_downloadable(row: int) -> bool:
+            if self.results_table.isRowHidden(row):
+                return False
+            btn = self.results_table.cellWidget(row, self.COL_DOWNLOAD)
+            if not btn:
+                return False
+            guid = btn.property("guid")
+            indexer_id = btn.property("indexerId")
+            if guid is None or indexer_id is None:
+                return False
+            key = (guid, indexer_id)
+            # Only enable actions for rows that are still actionable.
+            return key not in self._downloaded_release_keys
 
-        # Download All: enabled if at least one visible row exists
-        has_visible = False
-        for row in range(self.results_table.rowCount()):
-            if not self.results_table.isRowHidden(row):
-                has_visible = True
-                break
-        self.download_all_btn.setEnabled(has_visible)
+        # Download All: enabled only when at least one visible row is truly actionable.
+        has_visible_downloadable = any(is_row_downloadable(row) for row in range(self.results_table.rowCount()))
+        self.download_all_btn.setEnabled(has_visible_downloadable)
 
-        # Download Selected: enabled if at least one row is selected
-        has_selection = len(self.results_table.selectedIndexes()) > 0
-        self.download_selected_btn.setEnabled(has_selection)
+        # Download Selected: enabled only when selected rows include an actionable row.
+        selected_rows = set(idx.row() for idx in self.results_table.selectedIndexes())
+        has_selected_downloadable = any(is_row_downloadable(row) for row in selected_rows)
+        self.download_selected_btn.setEnabled(has_selected_downloadable)
 
     def get_current_row_title(self) -> Optional[str]:
         """Get title from currently selected row"""
@@ -2649,8 +2727,7 @@ class MainWindow(QMainWindow):
         Save preferences before exiting
         """
         # Wait for any running workers to finish, terminate if needed
-        if self.init_worker and self.init_worker.isRunning():
-            self.init_worker.wait(3000)
+        self._wait_worker(self.init_worker, "InitWorker", 3000)
         self._wait_worker(self.current_worker, "SearchWorker", 3000)
         self._wait_worker(self.everything_check_worker, "EverythingCheckWorker", 3000)
         self._wait_worker(self.download_worker, "DownloadWorker", 3000)
