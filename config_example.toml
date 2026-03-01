@@ -1,0 +1,30 @@
+[prowlarr]
+host = "http://localhost:9696"
+api_key = "xx"
+# http_basic_auth_username = ""
+# http_basic_auth_password = ""
+
+[settings]
+title_match_chars = 42
+everything_search_chars = 42
+web_search_url = "https://www.google.com/search?q={query}"
+
+everything_integration_method = "sdk"  # or "http" or "none"
+
+# Custom commands for F2/F3/F4 keys on results table
+# Placeholders: {title} = release title, {video} = video file path from Everything (or empty)
+# custom_command_F2 = 'my_script.bat "{title}" "{video}"'
+# custom_command_F3 = 'explorer /select,"{video}"'
+# custom_command_F4 = 'notepad "{title}"'
+
+
+api_timeout = 30          # Seconds before API requests time out
+api_retries = 2           # Number of retry attempts on connection errors / 5xx
+everything_batch_size = 10  # Number of Everything check results per UI update batch
+# everything_sdk_url = "https://www.voidtools.com/Everything-SDK.zip"  # Override SDK download URL
+
+
+[preferences]
+search_history = [ "aaa",]
+selected_indexers = []
+selected_categories = [ 6000,]
