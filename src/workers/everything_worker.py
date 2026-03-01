@@ -37,7 +37,13 @@ class EverythingCheckWorker(QThread):
         try:
             total = len(self.results)
             batch = []
+            interrupted = False
             for row, result in enumerate(self.results):
+                if self.isInterruptionRequested():
+                    interrupted = True
+                    logger.info("EverythingCheckWorker interruption requested, stopping early")
+                    break
+
                 title = result.get('title', 'Unknown')
 
                 # Search with wildcard pattern (thread-safe if lock provided)
@@ -50,6 +56,11 @@ class EverythingCheckWorker(QThread):
                         everything_results = self.everything.search(search_query, everything_max_results=100)
                 else:
                     everything_results = self.everything.search(search_query, everything_max_results=100)
+
+                if self.isInterruptionRequested():
+                    interrupted = True
+                    logger.info("EverythingCheckWorker interrupted after search call")
+                    break
 
                 # Collect matches into batch
                 if everything_results:
@@ -64,17 +75,18 @@ class EverythingCheckWorker(QThread):
                         logger.error(f"Failed to emit batch signals: {e}")
                     batch = []
 
-            # Emit remaining items
-            if batch:
+            if not interrupted:
+                # Emit remaining items
+                if batch:
+                    try:
+                        self.batch_ready.emit(batch)
+                    except Exception as e:
+                        logger.error(f"Failed to emit final batch signal: {e}")
+                # Always emit a terminal progress state so UI can display completion accurately.
                 try:
-                    self.batch_ready.emit(batch)
+                    self.progress.emit(total, total)
                 except Exception as e:
-                    logger.error(f"Failed to emit final batch signal: {e}")
-            # Always emit a terminal progress state so UI can display completion accurately.
-            try:
-                self.progress.emit(total, total)
-            except Exception as e:
-                logger.error(f"Failed to emit final progress signal: {e}")
+                    logger.error(f"Failed to emit final progress signal: {e}")
         except Exception as e:
             logger.error(f"Everything check error: {e}")
         finally:

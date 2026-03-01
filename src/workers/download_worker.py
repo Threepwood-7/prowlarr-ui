@@ -63,6 +63,9 @@ class DownloadWorker(QThread):
         idx = 0
         while True:
             with self._lock:
+                if self.isInterruptionRequested():
+                    logger.info("DownloadWorker interruption requested, stopping queue")
+                    break
                 if idx >= len(self.items):
                     break
                 item = self.items[idx]
@@ -70,6 +73,10 @@ class DownloadWorker(QThread):
             guid = item['guid']
             indexer_id = item['indexer_id']
             title = item['title']
+
+            if self.isInterruptionRequested():
+                logger.info("DownloadWorker interrupted before item download")
+                break
 
             try:
                 with self._lock:

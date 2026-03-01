@@ -100,6 +100,9 @@ class InitWorker(QThread):
         everything = None
         indexers = []
         error = ""
+        if self.isInterruptionRequested():
+            logger.info("InitWorker interrupted before initialization")
+            return
         try:
             kwargs = {}
             if self.everything_sdk_url:
@@ -107,12 +110,18 @@ class InitWorker(QThread):
             everything = EverythingSearch(self.everything_method, **kwargs)
         except Exception as e:
             logger.error(f"Failed to initialize Everything: {e}")
+        if self.isInterruptionRequested():
+            logger.info("InitWorker interrupted before indexer load")
+            return
         try:
             if self.prowlarr:
                 indexers = self.prowlarr.get_indexers()
         except Exception as e:
             error = f"Failed to load indexers: {e}"
             logger.error(error)
+        if self.isInterruptionRequested():
+            logger.info("InitWorker interrupted before completion emit")
+            return
         self.init_done.emit(everything, indexers, error)
 
 
@@ -216,6 +225,12 @@ class MainWindow(QMainWindow):
         self.splitter_save_timer.setSingleShot(True)
         self.splitter_save_timer.timeout.connect(self.save_splitter_sizes)
 
+        # Debounced config save timer to avoid blocking UI on frequent preference changes.
+        self._config_dirty = False
+        self.config_save_timer = QTimer()
+        self.config_save_timer.setSingleShot(True)
+        self.config_save_timer.timeout.connect(self._flush_config_save)
+
         # Create log window (hidden by default)
         self.log_window = LogWindow(self)
 
@@ -245,7 +260,7 @@ class MainWindow(QMainWindow):
         if "preferences" not in self.config:
             self.config["preferences"] = {}
         self.config["preferences"]["splitter_sizes"] = sizes
-        save_config(self.config)
+        self._schedule_config_save()
         logger.info(f"Splitter sizes saved: {sizes}")
 
     @safe_slot
@@ -254,7 +269,7 @@ class MainWindow(QMainWindow):
         if "preferences" not in self.config:
             self.config["preferences"] = {}
         self.config["preferences"]["hide_existing"] = checked
-        save_config(self.config)
+        self._schedule_config_save()
         self.apply_hide_existing_filter()
 
     def apply_hide_existing_filter(self):
@@ -316,11 +331,11 @@ class MainWindow(QMainWindow):
     def on_prowlarr_page_size_changed(self, value: int):
         """Handle max page size spinbox value change"""
         self.prowlarr_page_size = value
-        # Update config and save
+        # Update config and save via debounce
         if "settings" not in self.config:
             self.config["settings"] = {}
         self.config["settings"]["prowlarr_page_size"] = value
-        save_config(self.config)
+        self._schedule_config_save()
         logger.info(f"Max page size updated to {value}")
 
     @safe_slot
@@ -1099,7 +1114,7 @@ class MainWindow(QMainWindow):
         if "preferences" not in self.config:
             self.config["preferences"] = {}
         self.config["preferences"]["bookmarks"] = self._bookmarks
-        save_config(self.config)
+        self._schedule_config_save()
 
     @safe_slot
     def _on_search_return_pressed(self):
@@ -1352,11 +1367,29 @@ class MainWindow(QMainWindow):
         """
         try:
             save_config(self.config)
+            self._config_dirty = False
             return True
         except Exception as e:
             logger.error(f"Failed to save config: {e}")
             self.status_label.setText(f"ERROR: Failed to save preferences: {e}")
             return False
+
+    def _schedule_config_save(self, delay_ms: int = 300):
+        """Mark config dirty and debounce disk writes to keep UI responsive."""
+        self._config_dirty = True
+        self.config_save_timer.start(delay_ms)
+
+    def _flush_config_save(self):
+        """Write config if dirty; used by debounced timer."""
+        if not self._config_dirty:
+            return
+        try:
+            save_config(self.config)
+            self._config_dirty = False
+        except Exception as e:
+            logger.error(f"Failed to save config: {e}")
+            if hasattr(self, "status_label"):
+                self.status_label.setText(f"ERROR: Failed to save preferences: {e}")
 
     def _schedule_timer(self, delay_ms: int, callback):
         """
@@ -1382,13 +1415,30 @@ class MainWindow(QMainWindow):
         return timer
 
     def _wait_worker(self, worker, name: str, timeout_ms: int = 3000):
-        """Wait for a worker thread to finish with timeout, terminate if needed"""
+        """Wait for a worker thread to finish with cooperative cancellation first."""
         if not worker:
             return
-        if not worker.wait(timeout_ms):
-            logger.warning(f"{name} did not stop within {timeout_ms}ms, terminating")
+        try:
+            # First ask the worker to stop cooperatively.
+            if hasattr(worker, "requestInterruption"):
+                worker.requestInterruption()
+        except Exception as e:
+            logger.debug(f"Failed to request interruption for {name}: {e}")
+
+        try:
+            if worker.wait(timeout_ms):
+                return
+        except Exception as e:
+            logger.error(f"Failed waiting for {name}: {e}")
+            return
+
+        # Emergency fallback only if cooperative stop didn't work in time.
+        logger.warning(f"{name} did not stop within {timeout_ms}ms, force terminating")
+        try:
             worker.terminate()
             worker.wait(1000)
+        except Exception as e:
+            logger.error(f"Failed to terminate {name}: {e}")
 
     @safe_slot
     def page_fetch_finished(self, results: List[Dict], elapsed: float = 0.0):
@@ -1813,14 +1863,14 @@ class MainWindow(QMainWindow):
             return
 
     def _toggle_column_visibility(self, col: int, hidden: bool):
-        """Toggle column visibility and immediately persist to config"""
+        """Toggle column visibility and persist to config via debounce."""
         try:
             self.results_table.setColumnHidden(col, hidden)
             if "preferences" not in self.config:
                 self.config["preferences"] = {}
             hidden_cols = [self.COL_HEADERS[c] for c in range(self.COL_COUNT) if self.results_table.isColumnHidden(c)]
             self.config["preferences"]["hidden_columns"] = hidden_cols
-            save_config(self.config)
+            self._schedule_config_save()
         except Exception as e:
             logger.error(f"Failed to toggle column visibility: {e}")
 
@@ -1860,7 +1910,7 @@ class MainWindow(QMainWindow):
         if "preferences" in self.config:
             self.config["preferences"].pop("column_widths", None)
             self.config["preferences"].pop("hidden_columns", None)
-        save_config(self.config)
+        self._schedule_config_save()
         self.status_label.setText("View reset: all columns visible, default widths")
 
     def display_results(self, results: List[Dict]):
@@ -2743,6 +2793,8 @@ class MainWindow(QMainWindow):
         # Stop splitter save timer
         if self.splitter_save_timer.isActive():
             self.splitter_save_timer.stop()
+        if self.config_save_timer.isActive():
+            self.config_save_timer.stop()
 
         # Stop all pending timers to prevent firing after window closes
         # Copy list first: a timer's cleanup_wrapper could modify _pending_timers during iteration

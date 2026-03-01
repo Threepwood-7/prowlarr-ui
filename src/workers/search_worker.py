@@ -33,6 +33,11 @@ class SearchWorker(QThread):
     def run(self):
         """Execute search in background thread"""
         try:
+            # Allow shutdown path to cancel before any network work begins.
+            if self.isInterruptionRequested():
+                logger.info("SearchWorker interrupted before start")
+                return
+
             start_time = time.time()
             try:
                 self.progress.emit(f"Searching for '{self.query}'...")
@@ -51,6 +56,11 @@ class SearchWorker(QThread):
             if results is None:
                 results = []
 
+            # Avoid emitting stale completion updates if shutdown requested.
+            if self.isInterruptionRequested():
+                logger.info("SearchWorker interrupted before completion emit")
+                return
+
             elapsed = time.time() - start_time
             logger.info(f"Search completed in {elapsed:.2f}s, found {len(results)} results")
 
@@ -59,6 +69,9 @@ class SearchWorker(QThread):
             except Exception as e:
                 logger.error(f"Failed to emit search_done signal: {e}")
         except Exception as e:
+            if self.isInterruptionRequested():
+                logger.info("SearchWorker interrupted during execution")
+                return
             error_msg = str(e)
             logger.error(f"Search error: {error_msg}")
             try:

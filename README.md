@@ -10,14 +10,14 @@ Built with PySide6 (Qt for Python).
 
 ## Features
 
-- **Multi-indexer search** — query all your Prowlarr indexers at once, filter by indexer and category
-- **Duplicate detection** — automatically checks results against [Everything](https://www.voidtools.com/) to find files you already have on disk
-- **Batch downloads** — download individual results, selected rows, or everything visible with one click
-- **Bookmarks** — save frequently used search queries for quick access
-- **Quality parsing** — displays resolution, source, codec, and HDR info extracted from release titles
-- **Keyboard-driven** — full keyboard navigation with single-key shortcuts for common actions
-- **Custom commands** — bind F2/F3/F4 to your own scripts with `{title}` and `{video}` placeholders
-- **Paginated results** — navigate through large result sets page by page or load all pages at once
+- **Multi-indexer search** - query all your Prowlarr indexers at once, filter by indexer and category
+- **Duplicate detection** - automatically checks results against [Everything](https://www.voidtools.com/) to find files you already have on disk
+- **Batch downloads** - download individual results, selected rows, or everything visible with one click
+- **Bookmarks** - save frequently used search queries for quick access
+- **Quality parsing** - displays resolution, source, codec, and HDR info extracted from release titles
+- **Keyboard-driven** - full keyboard navigation with single-key shortcuts for common actions
+- **Custom commands** - bind F2/F3/F4 to your own scripts with `{title}` and `{video}` placeholders
+- **Paginated results** - navigate through large result sets page by page or load all pages at once
 
 ## Screenshot
 
@@ -30,7 +30,7 @@ Built with PySide6 (Qt for Python).
 - **Windows** (10 or later)
 - **Python 3.10+**
 - **Prowlarr** instance with API access
-- **Everything** (optional) — for duplicate detection via SDK or HTTP server
+- **Everything** (optional) - for duplicate detection via SDK or HTTP server
 
 ## Installation
 
@@ -166,6 +166,13 @@ Run the integration tests to verify your Prowlarr and Everything connections:
 
 ```bash
 python test_integrations.py
+```
+
+Run the automated headless UI tests (mocked, no live Prowlarr/Everything required):
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
 ```
 
 ## Dependencies
