@@ -85,6 +85,10 @@ def validate_config(config: Dict) -> list:
 
         'everything_recheck_delay': (0, 60000, 4000),
         'everything_batch_size': (1, 1000, 10),
+        'download_queue_stale_grace_seconds': (0.1, 300.0, 20.0),
+        'shutdown_force_after_seconds': (1.0, 300.0, 15.0),
+        'shutdown_force_arm_seconds': (1.0, 60.0, 8.0),
+        'everything_check_stale_grace_seconds': (0.1, 300.0, 20.0),
     }
 
     for key, (min_val, max_val, default_val) in clamp_rules.items():

@@ -1,7 +1,7 @@
 """Background worker for Prowlarr API search operations"""
 import time
 import logging
-from typing import List, Dict
+from typing import List, Dict, Optional
 from PySide6.QtCore import QThread, Signal
 
 from src.api.prowlarr_client import ProwlarrClient
@@ -20,8 +20,8 @@ class SearchWorker(QThread):
     error = Signal(str)        # Emits error message
     progress = Signal(str)     # Emits progress updates
 
-    def __init__(self, client: ProwlarrClient, query: str, indexer_ids: List[int],
-                 categories: List[int], offset: int = 0, limit: int = 1000):
+    def __init__(self, client: ProwlarrClient, query: str, indexer_ids: Optional[List[int]],
+                 categories: Optional[List[int]], offset: int = 0, limit: int = 1000):
         super().__init__()
         self.client = client
         self.query = query
@@ -47,8 +47,8 @@ class SearchWorker(QThread):
             # Execute the search
             results = self.client.search(
                 self.query,
-                self.indexer_ids if self.indexer_ids else None,
-                self.categories if self.categories else None,
+                self.indexer_ids,
+                self.categories,
                 self.offset,
                 self.limit,
                 should_cancel=self.isInterruptionRequested,

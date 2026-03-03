@@ -145,8 +145,8 @@ class ProwlarrClient:
             {"id": 8000, "name": "Other"},
         ]
 
-    def search(self, query: str, indexer_ids: List[int] = None,
-               categories: List[int] = None, offset: int = 0, limit: int = 1000,
+    def search(self, query: str, indexer_ids: Optional[List[int]] = None,
+               categories: Optional[List[int]] = None, offset: int = 0, limit: int = 1000,
                should_cancel: Optional[Callable[[], bool]] = None) -> List[Dict]:
         """
         Search across indexers
@@ -160,12 +160,12 @@ class ProwlarrClient:
                 'limit': limit
             }
 
-            # Only include indexerIds if specific indexers selected
-            if indexer_ids:
+            # Include explicit list when provided. None means "all".
+            if indexer_ids is not None:
                 params['indexerIds'] = indexer_ids
 
-            # Only include categories if specific categories selected
-            if categories:
+            # Include explicit list when provided. None means "all".
+            if categories is not None:
                 params['categories'] = categories
 
             return self._api_request('search', params, should_cancel=should_cancel)

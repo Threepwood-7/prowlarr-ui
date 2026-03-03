@@ -12,7 +12,7 @@ import logging
 import time
 import webbrowser
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from urllib.parse import quote
 
 from PySide6.QtWidgets import (
@@ -217,7 +217,7 @@ class MainWindow(QMainWindow):
         self.download_worker = None
         self.current_results = []
         self.current_offset = 0
-        self._video_paths = {}  # title -> video file path from Everything
+        self._video_paths = {}  # (guid, indexer_id) -> video file path from Everything
         self._search_generation = 0  # Incremented on each new search, used to invalidate stale timers
         self._everything_check_generation = 0  # Generation when Everything check started
         self._pending_everything_check_generation = None  # Deferred generation to run after an in-flight check ends
@@ -243,6 +243,10 @@ class MainWindow(QMainWindow):
         self._shutdown_force_armed_until = None
         self._everything_check_stale_grace_seconds = float(settings.get("everything_check_stale_grace_seconds", 20.0))
         self._everything_check_owner_since = None
+        self._indexers_loaded = False  # True once populate_indexers has restored tree state
+        self._categories_loaded = False  # True once populate_categories has restored tree state
+        self._indexers_item_changed_connected = False
+        self._categories_item_changed_connected = False
 
         # Multi-page fetch state
         self._load_all_active = False
@@ -360,8 +364,11 @@ class MainWindow(QMainWindow):
     def _persist_runtime_preferences(self):
         """Persist current runtime preference state to INI."""
         self._set_pref("search_history", list(self.search_history), schedule_sync=False)
-        self._set_pref("selected_indexers", self._get_checked_indexer_ids(), schedule_sync=False)
-        self._set_pref("selected_categories", self._get_checked_category_ids(), schedule_sync=False)
+        # Avoid wiping saved selection when close occurs before async init populates trees.
+        if self._indexers_loaded:
+            self._set_pref("selected_indexers", self._get_checked_indexer_ids(), schedule_sync=False)
+        if self._categories_loaded:
+            self._set_pref("selected_categories", self._get_checked_category_ids(), schedule_sync=False)
         self._set_pref("splitter_sizes", [int(s) for s in self.splitter.sizes()], schedule_sync=False)
         self._set_pref("hide_existing", bool(self.hide_existing_checkbox.isChecked()), schedule_sync=False)
         hidden_cols = [self.COL_HEADERS[col] for col in range(self.COL_COUNT) if self.results_table.isColumnHidden(col)]
@@ -992,14 +999,25 @@ class MainWindow(QMainWindow):
 
                 root.appendRow(item)
 
+        # Derive parent state from children so restored state is internally consistent.
+        if root.rowCount() == 0:
+            root.setCheckState(Qt.Unchecked)
+        else:
+            all_checked = all(root.child(i).checkState() == Qt.Checked for i in range(root.rowCount()))
+            any_checked = any(root.child(i).checkState() == Qt.Checked for i in range(root.rowCount()))
+            root.setCheckState(Qt.Checked if all_checked else (Qt.PartiallyChecked if any_checked else Qt.Unchecked))
+
         self.indexers_tree.expandAll()
 
         # Connect change handler (disconnect first to avoid duplicate connections)
-        try:
-            self.indexers_model.itemChanged.disconnect(self.indexer_item_changed)
-        except RuntimeError:
-            pass  # Not connected yet
+        if self._indexers_item_changed_connected:
+            try:
+                self.indexers_model.itemChanged.disconnect(self.indexer_item_changed)
+            except (RuntimeError, TypeError):
+                self._indexers_item_changed_connected = False
         self.indexers_model.itemChanged.connect(self.indexer_item_changed)
+        self._indexers_item_changed_connected = True
+        self._indexers_loaded = True
 
     def populate_categories(self, categories: List[Dict]):
         """Populate categories tree with checkboxes"""
@@ -1031,14 +1049,25 @@ class MainWindow(QMainWindow):
 
             root.appendRow(item)
 
+        # Derive parent state from children so restored state is internally consistent.
+        if root.rowCount() == 0:
+            root.setCheckState(Qt.Unchecked)
+        else:
+            all_checked = all(root.child(i).checkState() == Qt.Checked for i in range(root.rowCount()))
+            any_checked = any(root.child(i).checkState() == Qt.Checked for i in range(root.rowCount()))
+            root.setCheckState(Qt.Checked if all_checked else (Qt.PartiallyChecked if any_checked else Qt.Unchecked))
+
         self.categories_tree.expandAll()
 
         # Connect change handler (disconnect first to avoid duplicate connections)
-        try:
-            self.categories_model.itemChanged.disconnect(self.category_item_changed)
-        except RuntimeError:
-            pass  # Not connected yet
+        if self._categories_item_changed_connected:
+            try:
+                self.categories_model.itemChanged.disconnect(self.category_item_changed)
+            except (RuntimeError, TypeError):
+                self._categories_item_changed_connected = False
         self.categories_model.itemChanged.connect(self.category_item_changed)
+        self._categories_item_changed_connected = True
+        self._categories_loaded = True
 
     @safe_slot
     def indexer_item_changed(self, item: QStandardItem):
@@ -1081,26 +1110,26 @@ class MainWindow(QMainWindow):
             root.setCheckState(Qt.Checked if all_checked else (Qt.PartiallyChecked if any_checked else Qt.Unchecked))
             self.categories_model.blockSignals(False)
 
-    def get_selected_indexers(self) -> List[int]:
+    def get_selected_indexers(self) -> Optional[List[int]]:
         """
         Get list of selected indexer IDs
-        Returns empty list if all are selected (don't pass to API)
+        Returns:
+            None: all selected (do not send explicit filter to API)
+            []: none selected
+            [ids...]: explicit subset
         """
         root = self.indexers_model.item(0)
         if not root:
+            return None
+
+        if root.rowCount() == 0:
             return []
 
-        # Check if all children are checked
-        if root.checkState() == Qt.Checked:
-            all_checked = True
-            for i in range(root.rowCount()):
-                if root.child(i).checkState() != Qt.Checked:
-                    all_checked = False
-                    break
-            if all_checked:
-                return []  # All selected - return empty to search all
+        all_checked = all(root.child(i).checkState() == Qt.Checked for i in range(root.rowCount()))
+        if all_checked:
+            return None
 
-        # Return only selected indexers
+        # Return explicit checked indexers (possibly empty when user deselects all).
         selected = []
         for i in range(root.rowCount()):
             child = root.child(i)
@@ -1111,26 +1140,26 @@ class MainWindow(QMainWindow):
 
         return selected
 
-    def get_selected_categories(self) -> List[int]:
+    def get_selected_categories(self) -> Optional[List[int]]:
         """
         Get list of selected category IDs
-        Returns empty list if all are selected (don't pass to API)
+        Returns:
+            None: all selected (do not send explicit filter to API)
+            []: none selected
+            [ids...]: explicit subset
         """
         root = self.categories_model.item(0)
         if not root:
+            return None
+
+        if root.rowCount() == 0:
             return []
 
-        # Check if all children are checked
-        if root.checkState() == Qt.Checked:
-            all_checked = True
-            for i in range(root.rowCount()):
-                if root.child(i).checkState() != Qt.Checked:
-                    all_checked = False
-                    break
-            if all_checked:
-                return []  # All selected - return empty to search all
+        all_checked = all(root.child(i).checkState() == Qt.Checked for i in range(root.rowCount()))
+        if all_checked:
+            return None
 
-        # Return only selected categories
+        # Return explicit checked categories (possibly empty when user deselects all).
         selected = []
         for i in range(root.rowCount()):
             child = root.child(i)
@@ -1140,6 +1169,23 @@ class MainWindow(QMainWindow):
                     selected.append(category_id)
 
         return selected
+
+    def _resolve_search_scope(self) -> Optional[Tuple[Optional[List[int]], Optional[List[int]]]]:
+        """
+        Resolve current indexer/category filter scope.
+        Returns None after writing status when scope is explicitly empty.
+        """
+        indexer_ids = self.get_selected_indexers()
+        if indexer_ids == []:
+            self.status_label.setText("No indexers selected")
+            return None
+
+        categories = self.get_selected_categories()
+        if categories == []:
+            self.status_label.setText("No categories selected")
+            return None
+
+        return indexer_ids, categories
 
     def _get_checked_indexer_ids(self) -> List[int]:
         """Get explicit list of checked indexer IDs for saving preferences"""
@@ -1409,12 +1455,24 @@ class MainWindow(QMainWindow):
         self.search_history = self.search_history[:50]  # Keep last 50
         self.completer.model().setStringList(self.search_history)
 
-        # Get filter selections
-        indexer_ids = self.get_selected_indexers()
-        categories = self.get_selected_categories()
+        scope = self._resolve_search_scope()
+        if scope is None:
+            return
+        indexer_ids, categories = scope
 
-        indexer_info = f"{len(indexer_ids)} selected: {indexer_ids}" if indexer_ids else "all"
-        category_info = f"{len(categories)} selected: {categories}" if categories else "all"
+        if indexer_ids is None:
+            indexer_info = "all"
+        elif indexer_ids:
+            indexer_info = f"{len(indexer_ids)} selected: {indexer_ids}"
+        else:
+            indexer_info = "none"
+
+        if categories is None:
+            category_info = "all"
+        elif categories:
+            category_info = f"{len(categories)} selected: {categories}"
+        else:
+            category_info = "none"
         self.log(f"Starting search: query='{query}', page_size={self.prowlarr_page_size}, indexers={indexer_info}, categories={category_info}")
 
         # Disable download buttons and reset progress bar
@@ -1518,6 +1576,10 @@ class MainWindow(QMainWindow):
         self.search_history = self.search_history[:50]
         self.completer.model().setStringList(self.search_history)
 
+        scope = self._resolve_search_scope()
+        if scope is None:
+            return
+
         # Initialize multi-page state
         self._load_all_active = True
         self._load_all_results = []
@@ -1561,8 +1623,16 @@ class MainWindow(QMainWindow):
             self.stop_spinner("search")
             return
         query = self.query_input.text().strip()
-        indexer_ids = self.get_selected_indexers()
-        categories = self.get_selected_categories()
+        scope = self._resolve_search_scope()
+        if scope is None:
+            self._load_all_active = False
+            self.search_btn.setEnabled(True)
+            self.load_all_btn.setText("Load A&ll")
+            self.load_all_btn.setEnabled(True)
+            self._release_table_sort_lock("search")
+            self.stop_spinner("search")
+            return
+        indexer_ids, categories = scope
         offset = (self._load_all_page - 1) * self.prowlarr_page_size
 
         self.status_label.setText(f"Loading page {self._load_all_page}...")
@@ -1618,9 +1688,10 @@ class MainWindow(QMainWindow):
         # Cancel any active Load All - explicit page fetch supersedes it
         self._load_all_active = False
 
-        # Get filter selections
-        indexer_ids = self.get_selected_indexers()
-        categories = self.get_selected_categories()
+        scope = self._resolve_search_scope()
+        if scope is None:
+            return
+        indexer_ids, categories = scope
 
         # Calculate offset based on page number
         offset = (page_number - 1) * self.prowlarr_page_size
@@ -1977,11 +2048,13 @@ class MainWindow(QMainWindow):
 
             title_item.setToolTip("\n".join(tooltip_lines))
 
-            # Store video file path keyed by title
+            # Store video file path keyed by stable release identity
             try:
                 video = self._find_video_file(everything_results)
                 if video:
-                    self._video_paths[title_item.text()] = video
+                    release_key = self._get_release_key_for_row(row)
+                    if release_key:
+                        self._video_paths[release_key] = video
             except Exception as e:
                 self.log(f"ERROR in _find_video_file: {e}")
 
@@ -2427,6 +2500,17 @@ class MainWindow(QMainWindow):
         if guid in (None, "") or indexer_id is None:
             return None
         return {"guid": guid, "indexer_id": indexer_id, "title": title}
+
+    def _get_release_key_for_row(self, row: int) -> Optional[Tuple[str, int]]:
+        """Resolve stable release key from a row's download button metadata."""
+        button = self.results_table.cellWidget(row, self.COL_DOWNLOAD)
+        if not button:
+            return None
+        guid = button.property("guid")
+        indexer_id = button.property("indexerId")
+        if guid in (None, "") or indexer_id is None:
+            return None
+        return guid, indexer_id
 
     def _download_from_button(self, btn):
         """Find the button's current row and download that release"""
@@ -2898,11 +2982,11 @@ class MainWindow(QMainWindow):
         return None
 
     def _get_video_path_for_row(self, row: int) -> Optional[str]:
-        """Get stored video file path for a row by looking up its title in the dict"""
-        title_item = self.results_table.item(row, self.COL_TITLE)
-        if not title_item:
+        """Get stored video file path for a row by release identity."""
+        release_key = self._get_release_key_for_row(row)
+        if not release_key:
             return None
-        return self._video_paths.get(title_item.text())
+        return self._video_paths.get(release_key)
 
     @safe_slot
     def _on_cell_double_clicked(self, row: int, column: int):
