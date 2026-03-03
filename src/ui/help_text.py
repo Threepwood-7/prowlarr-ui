@@ -34,6 +34,7 @@ HELP_HTML = """\
 <tr><td><b>Shift+Tab</b></td><td>Jump to previous title group</td></tr>
 <tr><td><b>Ctrl+A</b></td><td>Select all visible rows</td></tr>
 <tr><td><b>Ctrl+F</b></td><td>Find in table (Enter=next, Shift+Enter=prev, Esc=close)</td></tr>
+<tr><td><b>Alt+X</b></td><td>Exit application</td></tr>
 <tr><td><b>F1</b></td><td>Show this help dialog</td></tr>
 <tr><td><b>Double-click</b></td><td>Download row</td></tr>
 <tr><td><b>Right-click</b></td><td>Context menu with all actions</td></tr>
@@ -54,7 +55,7 @@ After downloading, results are rechecked automatically.</p>
 <p><b>File</b></p>
 <ul>
 
-<li><b>Exit</b> &ndash; Close the application</li>
+<li><b>Exit (Alt+X)</b> &ndash; Close the application</li>
 </ul>
 
 <p><b>View</b></p>

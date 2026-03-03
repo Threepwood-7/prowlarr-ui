@@ -51,6 +51,7 @@ class SearchWorker(QThread):
                 self.categories if self.categories else None,
                 self.offset,
                 self.limit,
+                should_cancel=self.isInterruptionRequested,
             )
 
             if results is None:

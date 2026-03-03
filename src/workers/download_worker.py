@@ -1,7 +1,7 @@
 """Background worker for queued download operations"""
 import logging
 import threading
-from typing import List, Dict
+from typing import List, Dict, Optional
 from PySide6.QtCore import QThread, Signal
 
 from src.api.prowlarr_client import ProwlarrClient
@@ -31,6 +31,7 @@ class DownloadWorker(QThread):
         self.client = client
         self._lock = threading.Lock()
         self._queued_keys = set()
+        self._accepting_new_items = True
         self.items = []
         # Normalize initial queue to unique items so duplicates are never processed twice.
         for item in items:
@@ -45,10 +46,15 @@ class DownloadWorker(QThread):
         """Stable queue identity for deduplication."""
         return item.get('guid'), item.get('indexer_id')
 
-    def add_items(self, new_items: List[Dict]) -> List[Dict]:
-        """Thread-safe append of unique new items to the queue while running."""
+    def add_items(self, new_items: List[Dict]) -> Optional[List[Dict]]:
+        """
+        Thread-safe append of unique new items to the queue while running.
+        Returns None if the worker has already entered shutdown and cannot accept items.
+        """
         added = []
         with self._lock:
+            if not self._accepting_new_items or self.isInterruptionRequested():
+                return None
             for item in new_items:
                 key = self._item_key(item)
                 if key in self._queued_keys:
@@ -58,15 +64,22 @@ class DownloadWorker(QThread):
                 added.append(item)
         return added
 
+    def is_accepting_items(self) -> bool:
+        """Whether this worker can still accept new queue items."""
+        with self._lock:
+            return bool(self._accepting_new_items and not self.isInterruptionRequested())
+
     def run(self):
         """Process download queue sequentially, picking up newly added items"""
         idx = 0
         while True:
             with self._lock:
                 if self.isInterruptionRequested():
+                    self._accepting_new_items = False
                     logger.info("DownloadWorker interruption requested, stopping queue")
                     break
                 if idx >= len(self.items):
+                    self._accepting_new_items = False
                     break
                 item = self.items[idx]
 
@@ -88,7 +101,7 @@ class DownloadWorker(QThread):
             logger.info(f"Downloading {idx + 1}/{total}: {title}")
 
             try:
-                success = self.client.download(guid, indexer_id)
+                success = self.client.download(guid, indexer_id, should_cancel=self.isInterruptionRequested)
                 try:
                     # Emit composite identity to disambiguate duplicate GUIDs across indexers.
                     self.item_downloaded.emit(guid, int(indexer_id), success)
@@ -111,3 +124,6 @@ class DownloadWorker(QThread):
             self.queue_done.emit()
         except Exception as e:
             logger.error(f"Failed to emit queue_done signal: {e}")
+        finally:
+            with self._lock:
+                self._accepting_new_items = False

@@ -1,7 +1,6 @@
 """Background worker for Everything search operations"""
 import logging
-import threading
-from typing import List, Dict, Optional
+from typing import List, Dict
 from PySide6.QtCore import QThread, Signal
 
 from src.api.everything_search import EverythingSearch
@@ -13,7 +12,7 @@ class EverythingCheckWorker(QThread):
     """
     Background worker thread for checking Everything existence
     Emits results in batches to avoid flooding the main thread
-    Thread-safe: uses lock to prevent concurrent SDK access
+    Thread-safe: EverythingSearch handles SDK serialization internally
     """
 
     # Qt signals for thread communication
@@ -23,17 +22,17 @@ class EverythingCheckWorker(QThread):
 
     def __init__(self, everything: EverythingSearch, results: List[Dict],
                  title_match_chars: int, everything_search_chars: int,
-                 batch_size: int = 10, access_lock: Optional[threading.Lock] = None):
+                 batch_size: int = 10):
         super().__init__()
         self.everything = everything
-        self.results = results
+        # Snapshot result ordering so UI-side list mutations can't race worker iteration.
+        self.results = list(results)
         self.title_match_chars = title_match_chars
         self.everything_search_chars = everything_search_chars
         self.batch_size = batch_size
-        self._access_lock = access_lock  # Optional lock for thread-safe SDK access
 
     def run(self):
-        """Check each result in Everything, emit in batches (thread-safe with lock)"""
+        """Check each result in Everything, emit in batches."""
         try:
             total = len(self.results)
             batch = []
@@ -46,16 +45,11 @@ class EverythingCheckWorker(QThread):
 
                 title = result.get('title', 'Unknown')
 
-                # Search with wildcard pattern (thread-safe if lock provided)
+                # Search with wildcard pattern
                 # Quote the prefix to prevent Everything interpreting |, !, <, >, () as operators
                 prefix = title[:self.everything_search_chars].replace('"', '')
                 search_query = f'"{prefix}"*'
-
-                if self._access_lock:
-                    with self._access_lock:
-                        everything_results = self.everything.search(search_query, everything_max_results=100)
-                else:
-                    everything_results = self.everything.search(search_query, everything_max_results=100)
+                everything_results = self.everything.search(search_query, everything_max_results=100)
 
                 if self.isInterruptionRequested():
                     interrupted = True
