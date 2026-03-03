@@ -122,7 +122,7 @@ def _fake_config() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def mocked_main(monkeypatch):
+def mocked_main(monkeypatch, tmp_path):
     import prowlarr_ui as main
 
     monkeypatch.setattr(main, "ProwlarrClient", FakeProwlarrClient)
@@ -131,6 +131,7 @@ def mocked_main(monkeypatch):
     monkeypatch.setattr(main, "load_config", lambda: _fake_config())
     monkeypatch.setattr(main, "save_config", lambda _cfg: None)
     monkeypatch.setattr(main, "validate_config", lambda _cfg: [])
+    monkeypatch.setenv(main.PREFERENCES_INI_OVERRIDE_ENV, str(tmp_path / "test_prefs.ini"))
     return main
 
 

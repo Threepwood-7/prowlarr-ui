@@ -1,3 +1,5 @@
+import os
+
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QPushButton, QTableWidgetItem
 
@@ -129,3 +131,49 @@ def test_download_buttons_only_enabled_for_actionable_rows(window):
 
     assert not window.download_all_btn.isEnabled()
     assert not window.download_selected_btn.isEnabled()
+
+
+def test_view_menu_includes_fit_columns_action(window):
+    view_action = next((a for a in window.menuBar().actions() if a.text() == "&View"), None)
+    assert view_action is not None
+    view_menu = view_action.menu()
+    assert view_menu is not None
+    assert any(action.text() == "&Fit Columns" for action in view_menu.actions())
+
+
+def test_tools_menu_includes_edit_ini_action(window):
+    tools_action = next((a for a in window.menuBar().actions() if a.text() == "&Tools"), None)
+    assert tools_action is not None
+    tools_menu = tools_action.menu()
+    assert tools_menu is not None
+    assert any(action.text() == "Edit &.ini File" for action in tools_menu.actions())
+
+
+def test_fit_columns_resizes_visible_columns_and_persists_widths(window):
+    row = window.results_table.rowCount()
+    window.results_table.insertRow(row)
+    window.results_table.setItem(row, window.COL_TITLE, QTableWidgetItem("Some.Release.2026"))
+    window.results_table.setItem(row, window.COL_INDEXER, QTableWidgetItem("VeryLongIndexerNameForFitColumnsRegressionTest"))
+
+    window.results_table.setColumnWidth(window.COL_INDEXER, 40)
+    before = window.results_table.columnWidth(window.COL_INDEXER)
+
+    window._fit_columns()
+
+    after = window.results_table.columnWidth(window.COL_INDEXER)
+    assert after >= before
+    assert "fitted visible columns" in window.status_label.text().lower()
+    saved = window._get_pref_int_list("column_widths", []) or []
+    assert len(saved) == window.COL_COUNT - 1
+
+
+def test_edit_ini_file_opens_preferences_path(window, monkeypatch):
+    opened = {}
+    monkeypatch.setattr(window, "_open_file_with_default_app", lambda path: opened.__setitem__("path", path))
+
+    ini_path = window.preferences_store.fileName()
+
+    window._edit_preferences_ini_file()
+
+    assert opened["path"] == ini_path
+    assert os.path.exists(ini_path)
