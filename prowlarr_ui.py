@@ -1193,6 +1193,18 @@ class MainWindow(QMainWindow):
             if hasattr(self, "status_label"):
                 self.status_label.setText(reason)
 
+    @staticmethod
+    def _is_deleted_qt_wrapper_error(exc: Exception) -> bool:
+        """Detect common PySide wrapper-lifetime failures."""
+        if not isinstance(exc, RuntimeError):
+            return False
+        msg = str(exc).lower()
+        return "deleted" in msg and (
+            "wrapped c/c++ object" in msg
+            or "internal c++ object" in msg
+            or "c++ object" in msg
+        )
+
     def _is_everything_check_active(self) -> bool:
         """
         Whether Everything check ownership is currently active.
@@ -1209,7 +1221,10 @@ class MainWindow(QMainWindow):
         try:
             if hasattr(worker, "isRunning") and worker.isRunning():
                 return True
-        except Exception:
+        except Exception as e:
+            if self._is_deleted_qt_wrapper_error(e):
+                self._clear_everything_check_ownership("Recovered from deleted Everything worker wrapper")
+                return False
             return True
 
         elapsed = time.monotonic() - self._everything_check_owner_since
@@ -1235,7 +1250,10 @@ class MainWindow(QMainWindow):
         try:
             if hasattr(worker, "isRunning") and worker.isRunning():
                 return True
-        except Exception:
+        except Exception as e:
+            if self._is_deleted_qt_wrapper_error(e):
+                self._clear_download_queue_ownership("Recovered from deleted download worker wrapper")
+                return False
             return True
 
         elapsed = time.monotonic() - self._download_queue_owner_since
@@ -1315,7 +1333,14 @@ class MainWindow(QMainWindow):
         self.prowlarr_page_number_spinbox.blockSignals(False)
 
         # Create and start worker thread
-        self.current_worker = SearchWorker(self.prowlarr, query, indexer_ids, categories, 0, self.prowlarr_page_size)
+        try:
+            self.current_worker = SearchWorker(self.prowlarr, query, indexer_ids, categories, 0, self.prowlarr_page_size)
+        except Exception as e:
+            logger.error(f"Failed to create search worker: {e}")
+            self.current_worker = None
+            self._release_table_sort_lock("search")
+            self.status_label.setText(f"Failed to start search: {e}")
+            return
         self._track_worker(self.current_worker)
         self.current_worker.search_done.connect(lambda results, elapsed, w=self.current_worker: self.page_fetch_finished(results, elapsed, w))
         self.current_worker.error.connect(lambda error, w=self.current_worker: self.search_error(error, w))
@@ -1435,7 +1460,18 @@ class MainWindow(QMainWindow):
         offset = (self._load_all_page - 1) * self.prowlarr_page_size
 
         self.status_label.setText(f"Loading page {self._load_all_page}...")
-        self.current_worker = SearchWorker(self.prowlarr, query, indexer_ids, categories, offset, self.prowlarr_page_size)
+        try:
+            self.current_worker = SearchWorker(self.prowlarr, query, indexer_ids, categories, offset, self.prowlarr_page_size)
+        except Exception as e:
+            logger.error(f"Failed to create load-all worker: {e}")
+            self.current_worker = None
+            self._load_all_active = False
+            self.search_btn.setEnabled(True)
+            self.load_all_btn.setText("Load A&ll")
+            self.load_all_btn.setEnabled(True)
+            self._release_table_sort_lock("search")
+            self.status_label.setText(f"Failed to load page: {e}")
+            return
         self._track_worker(self.current_worker)
         self.current_worker.search_done.connect(lambda results, elapsed, w=self.current_worker: self.page_fetch_finished(results, elapsed, w))
         self.current_worker.error.connect(lambda error, w=self.current_worker: self.search_error(error, w))
@@ -1495,7 +1531,14 @@ class MainWindow(QMainWindow):
         self._pending_everything_recheck = None
 
         # Create and start worker thread
-        self.current_worker = SearchWorker(self.prowlarr, query, indexer_ids, categories, offset, self.prowlarr_page_size)
+        try:
+            self.current_worker = SearchWorker(self.prowlarr, query, indexer_ids, categories, offset, self.prowlarr_page_size)
+        except Exception as e:
+            logger.error(f"Failed to create fetch worker: {e}")
+            self.current_worker = None
+            self._release_table_sort_lock("search")
+            self.status_label.setText(f"Failed to fetch page: {e}")
+            return
         self._track_worker(self.current_worker)
         self.current_worker.search_done.connect(lambda results, elapsed, w=self.current_worker: self.page_fetch_finished(results, elapsed, w))
         self.current_worker.error.connect(lambda error, w=self.current_worker: self.search_error(error, w))
@@ -2421,7 +2464,17 @@ class MainWindow(QMainWindow):
                 _retry_enqueue("Download worker is not ready to accept new items yet")
                 return
 
-            added_items = add_items(items)
+            try:
+                added_items = add_items(items)
+            except Exception as e:
+                logger.warning(f"Download queue add_items failed: {e}")
+                if self._is_deleted_qt_wrapper_error(e) or not _is_worker_running(self.download_worker):
+                    self.log("Download queue owner became invalid; resetting ownership and retrying enqueue")
+                    self._clear_download_queue_ownership()
+                    self.start_download_queue(list(items), 0)
+                    return
+                _retry_enqueue("Download queue enqueue failed while worker is active")
+                return
             if added_items is None:
                 # Worker has already entered shutdown; retry enqueue with bounded backoff.
                 _retry_enqueue("Download queue is finishing")

@@ -261,6 +261,40 @@ def test_recheck_defers_when_worker_reference_exists_even_if_not_running(window)
     assert window._pending_everything_recheck["title_keys"] == {title_key}
 
 
+def test_everything_check_active_recovers_deleted_wrapper(window):
+    class DeletedWorker:
+        def isRunning(self):
+            raise RuntimeError("wrapped C/C++ object of type EverythingCheckWorker has been deleted")
+
+    window.everything_check_worker = DeletedWorker()
+    window._acquire_table_sort_lock("everything")
+    window.start_spinner("everything")
+
+    active = window._is_everything_check_active()
+
+    assert active is False
+    assert window.everything_check_worker is None
+    assert window.results_table.isSortingEnabled() is True
+    assert not _is_spinner_busy(window)
+
+
+def test_download_queue_active_recovers_deleted_wrapper(window):
+    class DeletedWorker:
+        def isRunning(self):
+            raise RuntimeError("wrapped C/C++ object of type DownloadWorker has been deleted")
+
+    window.download_worker = DeletedWorker()
+    window._acquire_table_sort_lock("download")
+    window.search_btn.setEnabled(False)
+
+    active = window._is_download_queue_active()
+
+    assert active is False
+    assert window.download_worker is None
+    assert window.search_btn.isEnabled() is True
+    assert window.results_table.isSortingEnabled() is True
+
+
 def test_wait_worker_uses_cooperative_stop_only(window):
     class SlowWorker:
         def __init__(self):
@@ -673,6 +707,54 @@ def test_search_handlers_ignore_stale_worker(window):
     assert window.search_btn.isEnabled() is False
 
 
+def test_start_search_releases_lock_when_search_worker_constructor_fails(window, mocked_main, monkeypatch):
+    window.query_input.setText("constructor fail")
+
+    def fail_worker(*_args, **_kwargs):
+        raise RuntimeError("search ctor boom")
+
+    monkeypatch.setattr(mocked_main, "SearchWorker", fail_worker)
+
+    window.start_search()
+
+    assert window.current_worker is None
+    assert window.results_table.isSortingEnabled() is True
+    assert "failed to start search" in window.status_label.text().lower()
+
+
+def test_load_all_releases_lock_when_search_worker_constructor_fails(window, mocked_main, monkeypatch):
+    window.query_input.setText("load all ctor fail")
+
+    def fail_worker(*_args, **_kwargs):
+        raise RuntimeError("load-all ctor boom")
+
+    monkeypatch.setattr(mocked_main, "SearchWorker", fail_worker)
+
+    window.start_load_all_pages()
+
+    assert window.current_worker is None
+    assert window._load_all_active is False
+    assert window.search_btn.isEnabled() is True
+    assert window.load_all_btn.text() == "Load A&ll"
+    assert window.results_table.isSortingEnabled() is True
+    assert "failed to load page" in window.status_label.text().lower()
+
+
+def test_fetch_page_releases_lock_when_search_worker_constructor_fails(window, mocked_main, monkeypatch):
+    window.query_input.setText("fetch ctor fail")
+
+    def fail_worker(*_args, **_kwargs):
+        raise RuntimeError("fetch ctor boom")
+
+    monkeypatch.setattr(mocked_main, "SearchWorker", fail_worker)
+
+    window.fetch_page(2)
+
+    assert window.current_worker is None
+    assert window.results_table.isSortingEnabled() is True
+    assert "failed to fetch page" in window.status_label.text().lower()
+
+
 def test_load_all_spinner_balanced_across_multiple_pages(window, monkeypatch):
     page1_worker = object()
     page2_worker = object()
@@ -772,6 +854,59 @@ def test_start_download_queue_retries_when_active_worker_no_longer_accepts(windo
 
     monkeypatch.setattr(window, "_schedule_timer", fake_schedule)
     window.download_worker = ClosingWorker()
+
+    window.start_download_queue([{"guid": "g1", "indexer_id": 1, "title": "One"}])
+
+    assert scheduled["count"] == 1
+    assert "retrying enqueue" in window.status_label.text().lower()
+
+
+def test_start_download_queue_recovers_when_add_items_raises_for_deleted_worker(window, mocked_main, monkeypatch):
+    class BrokenWorker:
+        def add_items(self, _items):
+            raise RuntimeError("wrapped C/C++ object of type DownloadWorker has been deleted")
+
+        def isRunning(self):
+            raise RuntimeError("wrapped C/C++ object of type DownloadWorker has been deleted")
+
+    created = {"count": 0}
+
+    class FreshWorker:
+        def __init__(self, *_args, **_kwargs):
+            created["count"] += 1
+            self.progress = _SignalStub()
+            self.item_downloaded = _SignalStub()
+            self.queue_done = _SignalStub()
+            self.started = False
+
+        def start(self):
+            self.started = True
+
+        def isRunning(self):
+            return True
+
+    monkeypatch.setattr(mocked_main, "DownloadWorker", FreshWorker)
+    monkeypatch.setattr(window, "_track_worker", lambda *_args, **_kwargs: None)
+    window.download_worker = BrokenWorker()
+
+    window.start_download_queue([{"guid": "g1", "indexer_id": 1, "title": "One"}])
+
+    assert created["count"] == 1
+    assert isinstance(window.download_worker, FreshWorker)
+    assert window.download_worker.started is True
+
+
+def test_start_download_queue_retries_when_add_items_raises_but_worker_still_running(window, monkeypatch):
+    class RunningBrokenWorker:
+        def add_items(self, _items):
+            raise RuntimeError("transient enqueue failure")
+
+        def isRunning(self):
+            return True
+
+    scheduled = {"count": 0}
+    monkeypatch.setattr(window, "_schedule_timer", lambda *_args, **_kwargs: scheduled.__setitem__("count", scheduled["count"] + 1))
+    window.download_worker = RunningBrokenWorker()
 
     window.start_download_queue([{"guid": "g1", "indexer_id": 1, "title": "One"}])
 
