@@ -59,7 +59,7 @@ api_key = "YOUR_API_KEY_HERE"
 ## Usage
 
 ```bash
-python main.py
+python prowlarr_ui.py
 ```
 
 ### Quick Start
@@ -88,6 +88,25 @@ These work when the results table is focused:
 | **F1** | Show help |
 | **F2 / F3 / F4** | Run custom commands (configurable) |
 
+### Menus
+
+**File** - Exit the application (Alt+X).
+
+**View**:
+- **Show Log** - Open the log window to view application messages
+- **Download History** - View the log of previously downloaded items
+- **Select Best per Group** - Highlight the best result in each title group (by seeders, fallback to size)
+- **Reset Sorting** - Restore default sort order (Title ASC, Indexer DESC, Age ASC)
+- **Reset View** - Reset column widths, splitter position, and sort order to defaults
+
+**Bookmarks** - Save and recall frequently used search queries:
+- **Add Bookmark** - Save the current search query
+- **Delete Bookmark** - Remove a saved bookmark
+- **Sort Bookmarks** - Sort all bookmarks alphabetically
+- Saved bookmarks appear as individual menu items for one-click re-search
+
+**Help** - Show the in-app help dialog (F1).
+
 ## Configuration
 
 All settings live in `prowlarr_ui_config.toml`. See [`prowlarr_ui_config_example.toml`](prowlarr_ui_config_example.toml) for the full template.
@@ -99,13 +118,13 @@ All settings live in `prowlarr_ui_config.toml`. See [`prowlarr_ui_config_example
 | `everything_integration_method` | `"sdk"` | `"sdk"`, `"http"`, or `"none"` |
 | `title_match_chars` | `42` | Characters used for title grouping and color coding |
 | `everything_search_chars` | `42` | Characters used for Everything prefix search |
+| `web_search_url` | `"https://...google..."` | URL template with `{query}` placeholder |
 | `api_timeout` | `120` | API request timeout in seconds |
-| `api_retries` | `2` | Retry attempts on connection errors |
+| `api_retries` | `2` | Retry attempts on connection errors / 5xx |
 | `prowlarr_page_size` | `100` | Results per page from Prowlarr API |
-| `everything_recheck_delay` | `6000` | Delay in ms before rechecking Everything after download |
+| `everything_recheck_delay` | `6000` | Delay (ms) before rechecking Everything after download |
 | `everything_max_results` | `5` | Max Everything matches shown in tooltip |
 | `everything_batch_size` | `10` | Results per UI update batch during Everything check |
-| `web_search_url` | `"https://...google..."` | URL template with `{query}` placeholder |
 
 ### Custom Commands
 
@@ -136,26 +155,27 @@ The `[preferences]` section is auto-saved on exit and includes search history, s
 ## Project Structure
 
 ```
-main.py                        Main entry point and UI (MainWindow)
+prowlarr_ui.py                     Main entry point and UI (MainWindow)
 src/
   api/
-    prowlarr_client.py         Prowlarr REST API client
-    everything_search.py       Everything SDK/HTTP integration
+    prowlarr_client.py             Prowlarr REST API client
+    everything_search.py           Everything SDK/HTTP integration
   workers/
-    search_worker.py           Background search thread
-    everything_worker.py       Background Everything check thread
-    download_worker.py         Download queue processor
+    search_worker.py               Background search thread
+    everything_worker.py           Background Everything check thread
+    download_worker.py             Download queue processor
   ui/
-    widgets.py                 Custom table widget for numeric sorting
-    log_window.py              Detachable log viewer window
-    help_text.py               Help dialog content
+    widgets.py                     Custom table widget for numeric sorting
+    log_window.py                  Detachable log viewer window
+    help_text.py                   Help dialog content
   utils/
-    config.py                  TOML config load/save with atomic writes
-    formatters.py              Size and age formatting utilities
-    logging_config.py          Rotating file log setup
-    quality_parser.py          Resolution/source/codec extraction from titles
-prowlarr_ui_config_example.toml            Configuration template
-test_integrations.py           Prowlarr + Everything connectivity tests
+    config.py                      TOML config load/save with atomic writes
+    formatters.py                  Size and age formatting utilities
+    logging_config.py              Rotating file log setup
+    quality_parser.py              Resolution/source/codec extraction from titles
+prowlarr_ui_config_example.toml    Configuration template
+test_integrations.py               Prowlarr + Everything connectivity tests
+tests/                             pytest-qt UI tests
 ```
 
 ## Testing
