@@ -13,7 +13,7 @@ class ProwlarrClient:
     """
 
     def __init__(self, host: str, api_key: str,
-                 timeout: int = 30, retries: int = 2,
+                 timeout: int = 300, retries: int = 2,
                  http_basic_auth_username: str = '', http_basic_auth_password: str = ''):
         self.host = host.rstrip('/')
         self.api_key = api_key
@@ -41,9 +41,9 @@ class ProwlarrClient:
         try:
             base = float(self.timeout)
         except Exception:
-            base = 120.0
+            base = 300.0
         if base <= 0:
-            base = 120.0
+            base = 300.0
         return base
 
     def _api_request(self, endpoint: str, params: Dict = None, method: str = 'GET',

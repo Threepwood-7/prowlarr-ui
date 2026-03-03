@@ -182,7 +182,7 @@ class MainWindow(QMainWindow):
             self.prowlarr = ProwlarrClient(
                 prowlarr_config.get("host", "http://localhost:9696"),
                 prowlarr_config.get("api_key", ""),
-                timeout=settings.get("api_timeout", 120),
+                timeout=settings.get("api_timeout", 300),
                 retries=settings.get("api_retries", 2),
                 http_basic_auth_username=prowlarr_config.get("http_basic_auth_username", ""),
                 http_basic_auth_password=prowlarr_config.get("http_basic_auth_password", ""),
