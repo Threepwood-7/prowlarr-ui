@@ -18,7 +18,7 @@ everything_integration_method = "sdk"  # or "http" or "none"
 # custom_command_F4 = 'notepad "{title}"'
 
 
-api_timeout = 30          # Seconds before API requests time out
+api_timeout = 120         # Seconds before API requests time out
 api_retries = 2           # Number of retry attempts on connection errors / 5xx
 everything_batch_size = 10  # Number of Everything check results per UI update batch
 # everything_sdk_url = "https://www.voidtools.com/Everything-SDK.zip"  # Override SDK download URL

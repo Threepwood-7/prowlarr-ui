@@ -1093,7 +1093,7 @@ def test_prowlarr_client_request_cancels_during_backoff(monkeypatch):
     assert calls["count"] == 1
 
 
-def test_prowlarr_client_uses_shorter_timeout_for_cancellable_requests(monkeypatch):
+def test_prowlarr_client_uses_configured_timeout_for_cancellable_requests(monkeypatch):
     class FakeResponse:
         status_code = 200
         text = "{}"
@@ -1105,7 +1105,7 @@ def test_prowlarr_client_uses_shorter_timeout_for_cancellable_requests(monkeypat
         def raise_for_status(self):
             return None
 
-    client = ProwlarrClient("http://fake-host", "api", timeout=30, retries=0)
+    client = ProwlarrClient("http://fake-host", "api", timeout=120, retries=0)
     from src.api import prowlarr_client as pc_module
 
     captured = {}
@@ -1118,8 +1118,8 @@ def test_prowlarr_client_uses_shorter_timeout_for_cancellable_requests(monkeypat
 
     client._api_request("search", should_cancel=lambda: False)
     timeout_value = captured["timeout"]
-    assert isinstance(timeout_value, tuple)
-    assert timeout_value[0] + timeout_value[1] <= 6.0
+    assert isinstance(timeout_value, float)
+    assert timeout_value == 120.0
 
 
 def test_close_event_does_not_schedule_duplicate_retry_when_already_pending(window, monkeypatch):

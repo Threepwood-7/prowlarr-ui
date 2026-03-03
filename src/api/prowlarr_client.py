@@ -35,21 +35,16 @@ class ProwlarrClient:
 
     def _request_timeout(self, cancellable: bool = False):
         """
-        Build a requests timeout value.
-        For cancellable worker calls we cap total timeout to improve shutdown responsiveness.
+        Build a requests timeout value (seconds).
+        Cancellable worker requests use the same timeout so long-running searches can complete.
         """
         try:
             base = float(self.timeout)
         except Exception:
-            base = 30.0
+            base = 120.0
         if base <= 0:
-            base = 30.0
-        if cancellable:
-            base = min(base, 6.0)
-
-        connect_timeout = min(2.0, max(0.5, base / 3.0))
-        read_timeout = max(0.5, base - connect_timeout)
-        return (connect_timeout, read_timeout)
+            base = 120.0
+        return base
 
     def _api_request(self, endpoint: str, params: Dict = None, method: str = 'GET',
                      data: Dict = None, should_cancel: Optional[Callable[[], bool]] = None) -> Any:

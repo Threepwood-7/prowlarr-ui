@@ -99,7 +99,7 @@ All settings live in `prowlarr_ui_config.toml`. See [`prowlarr_ui_config_example
 | `everything_integration_method` | `"sdk"` | `"sdk"`, `"http"`, or `"none"` |
 | `title_match_chars` | `42` | Characters used for title grouping and color coding |
 | `everything_search_chars` | `42` | Characters used for Everything prefix search |
-| `api_timeout` | `30` | API request timeout in seconds |
+| `api_timeout` | `120` | API request timeout in seconds |
 | `api_retries` | `2` | Retry attempts on connection errors |
 | `prowlarr_page_size` | `100` | Results per page from Prowlarr API |
 | `everything_recheck_delay` | `6000` | Delay in ms before rechecking Everything after download |

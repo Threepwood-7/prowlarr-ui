@@ -25,7 +25,9 @@ def get_default_config() -> Dict:
             'web_search_url': 'https://www.google.com/search?q={query}',
             'everything_integration_method': 'sdk',  # 'sdk', 'http', or 'none'
             'prowlarr_page_size': 100,  # Page size for each query
-            'everything_max_results': 5
+            'everything_max_results': 5,
+            'api_timeout': 120,
+            'api_retries': 2,
         }
     }
 
@@ -79,7 +81,7 @@ def validate_config(config: Dict) -> list:
         'everything_search_chars': (1, 200, defaults.get('everything_search_chars', 42)),
         'prowlarr_page_size': (1, 10000, defaults.get('prowlarr_page_size', 100)),
         'everything_max_results': (1, 100, defaults.get('everything_max_results', 5)),
-        'api_timeout': (1, 300, 30),
+        'api_timeout': (1, 300, 120),
         # Allow zero retries for operators who want strict single-attempt behavior.
         'api_retries': (0, 10, 2),
 
