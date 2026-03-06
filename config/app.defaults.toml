@@ -1,0 +1,16 @@
+[prowlarr]
+host = "http://localhost:9696"
+api_key = "YOUR_API_KEY_HERE"
+http_basic_auth_username = ""
+http_basic_auth_password = ""
+
+[settings]
+title_match_chars = 42
+everything_search_chars = 42
+everything_recheck_delay = 6000
+web_search_url = "https://www.google.com/search?q={query}"
+everything_integration_method = "sdk"
+prowlarr_page_size = 100
+everything_max_results = 5
+api_timeout = 300
+api_retries = 2

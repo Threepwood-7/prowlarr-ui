@@ -1,0 +1,36 @@
+# prowlarr-ui configuration example
+#
+# Usage:
+# 1) Copy this file to config/app.local.toml
+# 2) Edit host and API credentials
+#
+# Optional:
+# - APP_CONFIG_PATH points to a custom local config file path
+# - APP_SECRETS_PATH points to an external secrets TOML file
+# - env secrets override file values:
+#   PROWLARR_UI_API_KEY
+#   PROWLARR_UI_HTTP_BASIC_AUTH_PASSWORD
+
+[prowlarr]
+host = "http://localhost:9696"
+api_key = "YOUR_API_KEY_HERE"
+http_basic_auth_username = ""
+http_basic_auth_password = ""
+
+[settings]
+title_match_chars = 42
+everything_search_chars = 42
+everything_recheck_delay = 6000
+web_search_url = "https://www.google.com/search?q={query}"
+everything_integration_method = "sdk" # or "http" or "none"
+prowlarr_page_size = 100
+everything_max_results = 5
+api_timeout = 300
+api_retries = 2
+everything_batch_size = 10
+
+# Custom commands for F2/F3/F4 keys on results table
+# Placeholders: {title} = release title, {video} = video file path from Everything (or empty)
+# custom_command_F2 = 'my_script.bat "{title}" "{video}"'
+# custom_command_F3 = 'explorer /select,"{video}"'
+# custom_command_F4 = 'notepad "{title}"'

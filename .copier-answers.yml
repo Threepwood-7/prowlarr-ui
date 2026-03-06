@@ -1,0 +1,15 @@
+_commit: v1.4.0
+_src_path: C:/prj/p2p/ongithub/aatemplate
+project_name: prowlarr-ui
+package_name: prowlarr_ui
+description: Windows desktop application for searching Prowlarr indexers with Everything
+  integration.
+author_name: MT0z
+author_email: mt0z1@pir0z.yxz
+github_username: Threepwood-7
+project_version: 0.1.0
+runtime_dependencies:
+- PySide6>=6.10.2
+- requests>=2.31.0
+- tomlkit>=0.12.0
+- colorama>=0.4.6
