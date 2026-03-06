@@ -4,7 +4,6 @@ Prowlarr Search Client - PySide6 GUI Application
 Searches Prowlarr indexers and integrates with Everything for duplicate detection
 """
 
-import functools
 import logging
 import math
 import os
@@ -22,9 +21,7 @@ from PySide6.QtCore import (
     QItemSelectionModel,
     QSettings,
     Qt,
-    QThread,
     QTimer,
-    Signal,
 )
 from PySide6.QtGui import (
     QAction,
@@ -84,9 +81,11 @@ from prowlarr_ui.utils.formatters import format_age, format_size
 
 # Import from modular structure
 from prowlarr_ui.utils.logging_config import DOWNLOAD_HISTORY_PATH, setup_logging
+from prowlarr_ui.utils.qt_slots import safe_slot
 from prowlarr_ui.utils.quality_parser import parse_quality
 from prowlarr_ui.workers.download_worker import DownloadWorker
 from prowlarr_ui.workers.everything_worker import EverythingCheckWorker
+from prowlarr_ui.workers.init_worker import InitWorker
 from prowlarr_ui.workers.search_worker import SearchWorker
 
 logger = logging.getLogger(__name__)
@@ -94,65 +93,7 @@ logger = logging.getLogger(__name__)
 PREFERENCES_INI_OVERRIDE_ENV = "PROWLARR_UI_INI_PATH"
 SETTINGS_ORG_NAME = "ProwlarrUI"
 SETTINGS_APP_NAME = "Prowlarr Search Client"
-
-
-def safe_slot(func):
-    """Decorator to catch and log exceptions in Qt signal handlers.
-    PySide6 silently swallows exceptions in slots, so this ensures
-    they are logged to both the logger and the log window."""
-
-    @functools.wraps(func)
-    def wrapper(self, *args, **kwargs):
-        try:
-            return func(self, *args, **kwargs)
-        except Exception:
-            tb = traceback.format_exc()
-            logger.error(f"Exception in {func.__name__}:\n{tb}")
-            if hasattr(self, "log"):
-                self.log(f"ERROR in {func.__name__}: {tb}")
-
-    return wrapper
-
-
-class InitWorker(QThread):
-    """Background worker to initialize Everything and load Prowlarr indexers"""
-
-    init_done = Signal(object, list, str)  # (everything_instance, indexers, error)
-
-    def __init__(self, everything_method, prowlarr, everything_sdk_url=""):
-        super().__init__()
-        self.everything_method = everything_method
-        self.prowlarr = prowlarr
-        self.everything_sdk_url = everything_sdk_url
-
-    def run(self):
-        everything = None
-        indexers = []
-        error = ""
-        if self.isInterruptionRequested():
-            logger.info("InitWorker interrupted before initialization")
-            return
-        try:
-            kwargs = {}
-            if self.everything_sdk_url:
-                kwargs["sdk_url"] = self.everything_sdk_url
-            everything = EverythingSearch(self.everything_method, **kwargs)
-        except Exception as e:
-            logger.error(f"Failed to initialize Everything: {e}")
-        if self.isInterruptionRequested():
-            logger.info("InitWorker interrupted before indexer load")
-            return
-        try:
-            if self.prowlarr:
-                indexers = self.prowlarr.get_indexers(should_cancel=self.isInterruptionRequested)
-        except Exception as e:
-            error = f"Failed to load indexers: {e}"
-            logger.error(error)
-        if self.isInterruptionRequested():
-            logger.info("InitWorker interrupted before completion emit")
-            return
-        self.init_done.emit(everything, indexers, error)
-
+__all__ = ["EverythingSearch", "InitWorker", "MainWindow", "safe_slot"]
 
 class MainWindow(QMainWindow):
     """
