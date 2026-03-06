@@ -9,11 +9,17 @@ from typing import Any
 
 from PySide6.QtCore import QSettings
 
+from prowlarr_ui.runtime_paths import (
+    SETTINGS_APP_NAME,
+    SETTINGS_ORG_NAME,
+    configure_qsettings,
+)
+
 logger = logging.getLogger(__name__)
 
-APP_SLUG = "prowlarr-ui"
-CONFIG_SETTINGS_ORG_NAME = "ProwlarrUI"
-CONFIG_SETTINGS_APP_NAME = "Prowlarr Search Client Config"
+APP_SLUG = "prowlarr_ui"
+CONFIG_SETTINGS_ORG_NAME = SETTINGS_ORG_NAME
+CONFIG_SETTINGS_APP_NAME = SETTINGS_APP_NAME
 
 SECRET_ENV_TO_KEYS = (
     ("PROWLARR_UI_API_KEY", ("prowlarr", "api_key")),
@@ -51,89 +57,89 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 # (key, expected_type, default)
 CONFIG_SCHEMA: tuple[tuple[str, type, Any], ...] = (
-    ("prowlarr/host", str, DEFAULT_CONFIG["prowlarr"]["host"]),
-    ("prowlarr/api_key", str, DEFAULT_CONFIG["prowlarr"]["api_key"]),
+    ("config/prowlarr/host", str, DEFAULT_CONFIG["prowlarr"]["host"]),
+    ("config/prowlarr/api_key", str, DEFAULT_CONFIG["prowlarr"]["api_key"]),
     (
-        "prowlarr/http_basic_auth_username",
+        "config/prowlarr/http_basic_auth_username",
         str,
         DEFAULT_CONFIG["prowlarr"]["http_basic_auth_username"],
     ),
     (
-        "prowlarr/http_basic_auth_password",
+        "config/prowlarr/http_basic_auth_password",
         str,
         DEFAULT_CONFIG["prowlarr"]["http_basic_auth_password"],
     ),
-    ("settings/title_match_chars", int, DEFAULT_CONFIG["settings"]["title_match_chars"]),
+    ("config/settings/title_match_chars", int, DEFAULT_CONFIG["settings"]["title_match_chars"]),
     (
-        "settings/everything_search_chars",
+        "config/settings/everything_search_chars",
         int,
         DEFAULT_CONFIG["settings"]["everything_search_chars"],
     ),
     (
-        "settings/everything_recheck_delay",
+        "config/settings/everything_recheck_delay",
         int,
         DEFAULT_CONFIG["settings"]["everything_recheck_delay"],
     ),
-    ("settings/web_search_url", str, DEFAULT_CONFIG["settings"]["web_search_url"]),
+    ("config/settings/web_search_url", str, DEFAULT_CONFIG["settings"]["web_search_url"]),
     (
-        "settings/everything_integration_method",
+        "config/settings/everything_integration_method",
         str,
         DEFAULT_CONFIG["settings"]["everything_integration_method"],
     ),
     (
-        "settings/prowlarr_page_size",
+        "config/settings/prowlarr_page_size",
         int,
         DEFAULT_CONFIG["settings"]["prowlarr_page_size"],
     ),
     (
-        "settings/everything_max_results",
+        "config/settings/everything_max_results",
         int,
         DEFAULT_CONFIG["settings"]["everything_max_results"],
     ),
     (
-        "settings/everything_batch_size",
+        "config/settings/everything_batch_size",
         int,
         DEFAULT_CONFIG["settings"]["everything_batch_size"],
     ),
-    ("settings/api_timeout", int, DEFAULT_CONFIG["settings"]["api_timeout"]),
-    ("settings/api_retries", int, DEFAULT_CONFIG["settings"]["api_retries"]),
+    ("config/settings/api_timeout", int, DEFAULT_CONFIG["settings"]["api_timeout"]),
+    ("config/settings/api_retries", int, DEFAULT_CONFIG["settings"]["api_retries"]),
     (
-        "settings/everything_sdk_url",
+        "config/settings/everything_sdk_url",
         str,
         DEFAULT_CONFIG["settings"]["everything_sdk_url"],
     ),
     (
-        "settings/download_queue_stale_grace_seconds",
+        "config/settings/download_queue_stale_grace_seconds",
         float,
         DEFAULT_CONFIG["settings"]["download_queue_stale_grace_seconds"],
     ),
     (
-        "settings/shutdown_force_after_seconds",
+        "config/settings/shutdown_force_after_seconds",
         float,
         DEFAULT_CONFIG["settings"]["shutdown_force_after_seconds"],
     ),
     (
-        "settings/shutdown_force_arm_seconds",
+        "config/settings/shutdown_force_arm_seconds",
         float,
         DEFAULT_CONFIG["settings"]["shutdown_force_arm_seconds"],
     ),
     (
-        "settings/everything_check_stale_grace_seconds",
+        "config/settings/everything_check_stale_grace_seconds",
         float,
         DEFAULT_CONFIG["settings"]["everything_check_stale_grace_seconds"],
     ),
     (
-        "settings/custom_command_F2",
+        "config/settings/custom_command_F2",
         str,
         DEFAULT_CONFIG["settings"]["custom_command_F2"],
     ),
     (
-        "settings/custom_command_F3",
+        "config/settings/custom_command_F3",
         str,
         DEFAULT_CONFIG["settings"]["custom_command_F3"],
     ),
     (
-        "settings/custom_command_F4",
+        "config/settings/custom_command_F4",
         str,
         DEFAULT_CONFIG["settings"]["custom_command_F4"],
     ),
@@ -141,6 +147,7 @@ CONFIG_SCHEMA: tuple[tuple[str, type, Any], ...] = (
 
 
 def _new_config_settings() -> QSettings:
+    configure_qsettings()
     return QSettings(
         QSettings.Format.IniFormat,
         QSettings.Scope.UserScope,
@@ -164,6 +171,13 @@ def _set_nested_value(target: dict[str, Any], key_path: tuple[str, ...], value: 
             current[key] = next_value
         current = next_value
     current[key_path[-1]] = value
+
+
+def _schema_config_path(schema_key: str) -> tuple[str, ...]:
+    parts = tuple(schema_key.split("/"))
+    if parts and parts[0] == "config":
+        return parts[1:]
+    return parts
 
 
 def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -240,7 +254,7 @@ def load_config() -> dict[str, Any]:
     merged = get_default_config()
     for key, expected_type, default in CONFIG_SCHEMA:
         raw = settings.value(key, default)
-        _set_nested_value(merged, tuple(key.split("/")), _coerce_value(raw, expected_type, default))
+        _set_nested_value(merged, _schema_config_path(key), _coerce_value(raw, expected_type, default))
     _apply_secret_env_overrides(merged)
     return merged
 
@@ -251,7 +265,7 @@ def save_config(config: dict[str, Any]) -> None:
     settings = _new_config_settings()
 
     for key, expected_type, default in CONFIG_SCHEMA:
-        path = tuple(key.split("/"))
+        path = _schema_config_path(key)
         current: Any = merged
         for part in path:
             if not isinstance(current, dict):

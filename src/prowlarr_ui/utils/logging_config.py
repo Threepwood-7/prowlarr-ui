@@ -1,12 +1,12 @@
-"""Logging configuration for the application"""
+"""Logging configuration for the application."""
 
 import logging
-import tempfile
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
 
-# Keep runtime log artifacts in the OS temp area (not the current working dir).
-RUNTIME_DIR = Path(tempfile.gettempdir()) / "prowlarr-ui"
+from prowlarr_ui.runtime_paths import resolve_app_data_dir
+
+# Keep non-INI runtime artifacts under OV01-aware DATA_DIR/<app_name>.
+RUNTIME_DIR = resolve_app_data_dir()
 LOG_FILE_PATH = str(RUNTIME_DIR / "prowlarr_ui.log")
 DOWNLOAD_HISTORY_PATH = str(RUNTIME_DIR / "download_history.log")
 

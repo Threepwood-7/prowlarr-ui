@@ -11,6 +11,8 @@ from typing import Any
 
 import requests
 
+from prowlarr_ui.runtime_paths import resolve_app_data_dir
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,15 +51,8 @@ def find_everything_exe() -> str | None:
 
 
 def _resolve_sdk_dir() -> Path:
-    """Resolve SDK cache directory path for the current platform."""
-    if os.name == "nt":
-        appdata = os.getenv("APPDATA")
-        if appdata:
-            return Path(appdata) / "ProwlarrUI" / ".everything_sdk"
-        local_appdata = os.getenv("LOCALAPPDATA")
-        if local_appdata:
-            return Path(local_appdata) / "ProwlarrUI" / ".everything_sdk"
-    return Path.home() / ".prowlarr-ui" / ".everything_sdk"
+    """Resolve SDK cache directory path under the app data root."""
+    return resolve_app_data_dir() / ".everything_sdk"
 
 
 SDK_DIR = str(_resolve_sdk_dir())

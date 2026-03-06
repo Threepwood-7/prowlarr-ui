@@ -113,10 +113,15 @@ prowlarr-ui
 
 ## Configuration
 
-Runtime config is stored via QSettings:
+Runtime config and UI preferences share one QSettings INI store:
 
-- Backend: `QSettings(IniFormat, UserScope, "ProwlarrUI", "Prowlarr Search Client Config")`
-- Secrets are stored in the same config store (plaintext) and can be overridden by env vars:
+- Backend: `QSettings(IniFormat, UserScope, "ThreepSoftwz", "prowlarr_ui")`
+- Default INI path: `%APPDATA%\ThreepSoftwz\prowlarr_ui.ini`
+- Default non-INI data path (logs, download history, SDK cache): `%LOCALAPPDATA%\ThreepSoftwz\prowlarr_ui\`
+- OV01 env overrides:
+  - `CONFIG_DIR` overrides the QSettings INI root
+  - `DATA_DIR` overrides the non-INI data root
+- Secrets are still stored in the same config store (plaintext) and can be overridden by env vars:
   - `PROWLARR_UI_API_KEY`
   - `PROWLARR_UI_HTTP_BASIC_AUTH_PASSWORD`
 
@@ -149,7 +154,11 @@ Placeholders: `{title}` = release title, `{video}` = video file path from Everyt
 
 ### Preferences
 
-The `[preferences]` section is auto-saved on exit and includes search history, selected indexers/categories, splitter position, column widths, and bookmarks. You generally don't need to edit this manually.
+Persistent keys are namespaced:
+
+- `config/...` for service/runtime config
+- `prefs/...` for non-visual user preferences (history, bookmarks, selected filters)
+- `ui/...` for view state (splitter, hidden columns, column widths, toggles)
 
 ## Everything Integration
 

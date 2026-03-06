@@ -69,6 +69,7 @@ from prowlarr_ui.ui.help_text import HELP_HTML
 from prowlarr_ui.ui.log_window import LogWindow
 from prowlarr_ui.ui.setup_wizard import run_setup_wizard
 from prowlarr_ui.ui.widgets import NumericTableWidgetItem
+from prowlarr_ui.runtime_paths import SETTINGS_APP_NAME, SETTINGS_ORG_NAME, configure_qsettings
 from prowlarr_ui.utils.config import (
     config_store_file_path,
     ensure_config_exists,
@@ -90,9 +91,7 @@ from prowlarr_ui.workers.search_worker import SearchWorker
 
 logger = logging.getLogger(__name__)
 
-PREFERENCES_INI_OVERRIDE_ENV = "PROWLARR_UI_INI_PATH"
-SETTINGS_ORG_NAME = "ProwlarrUI"
-SETTINGS_APP_NAME = "Prowlarr Search Client"
+PREFS_NAMESPACE_KEYS = {"search_history", "bookmarks", "selected_indexers", "selected_categories"}
 __all__ = ["EverythingSearch", "InitWorker", "MainWindow", "safe_slot"]
 
 class MainWindow(QMainWindow):
@@ -116,6 +115,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        configure_qsettings()
         self.setWindowTitle("Prowlarr Search Client")
         self.setGeometry(100, 100, 1400, 800)
         self.setWindowIcon(self._create_globe_icon())
@@ -163,20 +163,13 @@ class MainWindow(QMainWindow):
         # Defer Everything search integration to background
         self.everything = None
 
-        # User preferences live in QSettings INI under per-user app config location.
-        ini_override = os.environ.get(PREFERENCES_INI_OVERRIDE_ENV, "").strip()
-        if ini_override:
-            ini_dir = os.path.dirname(os.path.abspath(ini_override))
-            if ini_dir:
-                os.makedirs(ini_dir, exist_ok=True)
-            self.preferences_store = QSettings(ini_override, QSettings.IniFormat)
-        else:
-            self.preferences_store = QSettings(
-                QSettings.IniFormat,
-                QSettings.UserScope,
-                SETTINGS_ORG_NAME,
-                SETTINGS_APP_NAME,
-            )
+        # UI/runtime preferences share the same canonical config store.
+        self.preferences_store = QSettings(
+            QSettings.IniFormat,
+            QSettings.UserScope,
+            SETTINGS_ORG_NAME,
+            SETTINGS_APP_NAME,
+        )
         self.search_history = self._get_pref_str_list("search_history", [])
 
         # Current search state
@@ -259,7 +252,8 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _pref_key(name: str) -> str:
-        return f"preferences/{name}"
+        namespace = "prefs" if name in PREFS_NAMESPACE_KEYS else "ui"
+        return f"{namespace}/{name}"
 
     @staticmethod
     def _to_list(value: Any, default: list[Any] | None = None) -> list[Any]:
@@ -3614,6 +3608,8 @@ class MainWindow(QMainWindow):
 
 def main():
     """Application entry point"""
+    configure_qsettings()
+
     # Ensure config keys exist in QSettings store.
     ensure_config_exists()
 
