@@ -1,4 +1,4 @@
-_commit: v1.4.0
+﻿_commit: v1.6.0
 _src_path: C:/prj/p2p/ongithub/aatemplate
 project_name: prowlarr-ui
 package_name: prowlarr_ui
@@ -9,7 +9,7 @@ author_email: mt0z1@pir0z.yxz
 github_username: Threepwood-7
 project_version: 0.1.0
 runtime_dependencies:
-- colorama>=0.4.6
 - PySide6>=6.10.2
 - requests>=2.32.5
 - tomlkit>=0.14.0
+
