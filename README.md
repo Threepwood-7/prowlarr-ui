@@ -190,13 +190,14 @@ These work when the results table is focused:
 
 ## Menus
 
-**File** - Exit the application (Alt+X).
+**File** - Exit the application (Ctrl+Q, Alt+X).
 
 **View**:
 - **Show Log** - Open the log window to view application messages
 - **Download History** - View the log of previously downloaded items
 - **Select Best per Group** - Highlight the best result in each title group (by seeders, fallback to size)
 - **Reset Sorting** - Restore default sort order (Title ASC, Indexer DESC, Age ASC)
+- **Fit Columns** - Resize visible columns to fit their contents
 - **Reset View** - Reset column widths, splitter position, and sort order to defaults
 
 **Bookmarks** - Save and recall frequently used search queries:
@@ -204,6 +205,8 @@ These work when the results table is focused:
 - **Delete Bookmark** - Remove a saved bookmark
 - **Sort Bookmarks** - Sort all bookmarks alphabetically
 - Saved bookmarks appear as individual menu items for one-click re-search
+
+**Tools** - Edit .ini File (opens the QSettings INI in your default editor).
 
 **Help** - Show the in-app help dialog (F1).
 
@@ -343,7 +346,7 @@ uv lock --check
 ### Config issues
 
 - On first run, the setup wizard should prompt for credentials
-- Use *Tools > Edit .ini file* to manually edit the config
+- Use *Tools > Edit .ini File* to manually edit the config
 
 ---
 

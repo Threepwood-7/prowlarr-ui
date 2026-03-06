@@ -813,7 +813,7 @@ class MainWindow(QMainWindow):
         # File menu
         file_menu = menubar.addMenu("&File")
         exit_action = QAction("E&xit", self)
-        exit_action.setShortcut(QKeySequence("Alt+X"))
+        exit_action.setShortcuts([QKeySequence("Ctrl+Q"), QKeySequence("Alt+X")])
         exit_action.setShortcutContext(Qt.ApplicationShortcut)
         exit_action.setStatusTip("Close the application")
         exit_action.triggered.connect(self.close)
@@ -1200,7 +1200,8 @@ class MainWindow(QMainWindow):
 
     def _add_bookmark_action(self, query: str):
         """Add a bookmark entry to the Bookmarks menu"""
-        action = QAction(query, self)
+        action = QAction(query.replace("&", "&&"), self)
+        action.setData(query)
         action.setStatusTip(f'Search for "{query}"')
         action.triggered.connect(lambda checked, q=query: self._search_bookmark(q))
         self.bookmarks_menu.addAction(action)
@@ -1218,7 +1219,8 @@ class MainWindow(QMainWindow):
         self._bookmarks.remove(query)
         # Remove the matching action from the menu
         for action in self.bookmarks_menu.actions():
-            if action.text() == query:
+            action_query = action.data()
+            if action_query == query:
                 self.bookmarks_menu.removeAction(action)
                 break
         self._save_bookmarks()

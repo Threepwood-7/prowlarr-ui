@@ -34,7 +34,7 @@ HELP_HTML = """\
 <tr><td><b>Shift+Tab</b></td><td>Jump to previous title group</td></tr>
 <tr><td><b>Ctrl+A</b></td><td>Select all visible rows</td></tr>
 <tr><td><b>Ctrl+F</b></td><td>Find in table (Enter=next, Shift+Enter=prev, Esc=close)</td></tr>
-<tr><td><b>Alt+X</b></td><td>Exit application</td></tr>
+<tr><td><b>Ctrl+Q / Alt+X</b></td><td>Exit application</td></tr>
 <tr><td><b>F1</b></td><td>Show this help dialog</td></tr>
 <tr><td><b>Double-click</b></td><td>Download row</td></tr>
 <tr><td><b>Right-click</b></td><td>Context menu with all actions</td></tr>
@@ -55,7 +55,7 @@ After downloading, results are rechecked automatically.</p>
 <p><b>File</b></p>
 <ul>
 
-<li><b>Exit (Alt+X)</b> &ndash; Close the application</li>
+<li><b>Exit (Ctrl+Q, Alt+X)</b> &ndash; Close the application</li>
 </ul>
 
 <p><b>View</b></p>
@@ -64,6 +64,7 @@ After downloading, results are rechecked automatically.</p>
 <li><b>Download History</b> &ndash; View the log of previously downloaded items</li>
 <li><b>Select Best per Group</b> &ndash; Highlight the best result in each title group based on size and seeders</li>
 <li><b>Reset Sorting</b> &ndash; Restore default sort order (Title ASC, Indexer DESC, Age ASC)</li>
+<li><b>Fit Columns</b> &ndash; Resize visible columns to fit their contents</li>
 <li><b>Reset View</b> &ndash; Reset column widths, splitter position, and sort order to defaults</li>
 </ul>
 <p><b>Bookmarks</b></p>
@@ -71,6 +72,10 @@ After downloading, results are rechecked automatically.</p>
 <li><b>Add Bookmark</b> &ndash; Save the current search query as a bookmark</li>
 <li><b>Delete Bookmark</b> &ndash; Remove a saved bookmark from the list</li>
 <li><b>Sort Bookmarks</b> &ndash; Sort all bookmarks alphabetically</li>
+</ul>
+<p><b>Tools</b></p>
+<ul>
+<li><b>Edit .ini File</b> &ndash; Open the preferences INI file in your default editor</li>
 </ul>
 <p><b>Help</b></p>
 <ul>

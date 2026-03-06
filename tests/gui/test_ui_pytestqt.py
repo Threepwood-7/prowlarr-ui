@@ -149,6 +149,28 @@ def test_tools_menu_includes_edit_ini_action(window):
     assert any(action.text() == "Edit &.ini File" for action in tools_menu.actions())
 
 
+def test_file_menu_exit_shortcuts_are_ctrl_q_and_alt_x(window):
+    file_action = next((a for a in window.menuBar().actions() if a.text() == "&File"), None)
+    assert file_action is not None
+    file_menu = file_action.menu()
+    assert file_menu is not None
+
+    exit_action = next((a for a in file_menu.actions() if a.text() == "E&xit"), None)
+    assert exit_action is not None
+    shortcuts = {shortcut.toString() for shortcut in exit_action.shortcuts()}
+    assert {"Ctrl+Q", "Alt+X"} <= shortcuts
+
+
+def test_dynamic_bookmark_label_escapes_ampersand(window):
+    query = "Rock & Roll"
+    window.query_input.setText(query)
+    window._add_bookmark()
+
+    dynamic_action = next((a for a in window.bookmarks_menu.actions() if a.data() == query), None)
+    assert dynamic_action is not None
+    assert dynamic_action.text() == "Rock && Roll"
+
+
 def test_fit_columns_resizes_visible_columns_and_persists_widths(window):
     row = window.results_table.rowCount()
     window.results_table.insertRow(row)
