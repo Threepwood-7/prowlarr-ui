@@ -176,13 +176,13 @@ class EverythingSearch:
             self.dll.Everything_GetResultSize.restype = ctypes.c_bool
 
             # Request flags - ensure size is included in results
-            EVERYTHING_REQUEST_FILE_NAME = 0x00000001
-            EVERYTHING_REQUEST_PATH = 0x00000002
-            EVERYTHING_REQUEST_SIZE = 0x00000010
+            everything_request_file_name = 0x00000001
+            everything_request_path = 0x00000002
+            everything_request_size = 0x00000010
 
             self.dll.Everything_SetRequestFlags.argtypes = [ctypes.c_uint]
             self.dll.Everything_SetRequestFlags(
-                EVERYTHING_REQUEST_FILE_NAME | EVERYTHING_REQUEST_PATH | EVERYTHING_REQUEST_SIZE
+                everything_request_file_name | everything_request_path | everything_request_size
             )
 
             self.sdk_available = True
