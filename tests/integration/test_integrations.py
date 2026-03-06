@@ -209,16 +209,16 @@ def main():
         print("Continuing without colors...\n")
 
     print(f"{Colors.BOLD}Prowlarr UI Integration Test Suite{Colors.RESET}")
-    print("Testing all integration methods with config/app.local.toml")
+    print("Testing all integration methods with runtime config store")
 
     # Load config
     print_header("Configuration")
     try:
         config = load_config()
-        print_test("Load config/app.local.toml", True, "Configuration loaded successfully")
+        print_test("Load runtime config", True, "Configuration loaded successfully")
     except Exception as e:
-        print_test("Load config/app.local.toml", False, str(e))
-        print(f"\n{Colors.RED}Cannot proceed without valid config/app.local.toml{Colors.RESET}")
+        print_test("Load runtime config", False, str(e))
+        print(f"\n{Colors.RED}Cannot proceed without valid runtime config{Colors.RESET}")
         return 1
 
     # Run all tests

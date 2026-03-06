@@ -62,21 +62,9 @@ Sync lockfile:
 uv lock
 ```
 
-2. Copy the example config and add your Prowlarr credentials:
+2. Start the app and complete the first-run setup wizard.
 
-```bash
-cp config/app.example.toml config/app.local.toml
-```
-
-3. Edit `config/app.local.toml` with your Prowlarr API key (found in Prowlarr under *Settings > General*):
-
-```toml
-[prowlarr]
-host = "http://localhost:9696"
-api_key = "YOUR_API_KEY_HERE"
-# http_basic_auth_username = ""
-# http_basic_auth_password = ""
-```
+3. Enter your Prowlarr host/API credentials (API key in Prowlarr under *Settings > General*).
 
 ## Usage
 
@@ -133,21 +121,12 @@ These work when the results table is focused:
 
 ## Configuration
 
-All settings use this contract:
+Runtime config is stored via QSettings:
 
-- `config/app.defaults.toml` (tracked defaults)
-- `config/app.example.toml` (tracked template)
-- `config/app.local.toml` (untracked local overrides)
-
-Secrets can live outside the repo in:
-
-- `%APPDATA%/prowlarr-ui/secrets.toml` (Windows)
-- `~/.config/prowlarr-ui/secrets.toml` (Linux/macOS)
-
-Optional global path overrides:
-
-- `APP_CONFIG_PATH`
-- `APP_SECRETS_PATH`
+- Backend: `QSettings(IniFormat, UserScope, "ProwlarrUI", "Prowlarr Search Client Config")`
+- Secrets are stored in the same config store (plaintext) and can be overridden by env vars:
+  - `PROWLARR_UI_API_KEY`
+  - `PROWLARR_UI_HTTP_BASIC_AUTH_PASSWORD`
 
 ### Key Settings
 
@@ -166,9 +145,9 @@ Optional global path overrides:
 
 ### Custom Commands
 
-Bind scripts to F2, F3, F4 in the `[settings]` section:
+Bind scripts to F2, F3, F4 in runtime settings:
 
-```toml
+```ini
 custom_command_F2 = 'my_script.bat "{title}" "{video}"'
 custom_command_F3 = 'explorer /select,"{video}"'
 custom_command_F4 = 'notepad "{title}"'
@@ -209,7 +188,7 @@ src/
       log_window.py                Detachable log viewer window
       help_text.py                 Help dialog content
     utils/
-      config.py                    TOML config load/save with atomic writes
+      config.py                    Typed QSettings config load/save
       formatters.py                Size and age formatting utilities
       logging_config.py            Rotating file log setup
       quality_parser.py            Resolution/source/codec extraction from titles
@@ -225,7 +204,6 @@ tests/
   ui/                              pytest-qt UI tests
   integration/                     Live/manual integration checks
     test_integrations.py           Prowlarr + Everything connectivity script
-config/app.example.toml            Configuration template
 CONTRIBUTING.md                    Contribution and tooling workflow
 ```
 
@@ -279,7 +257,6 @@ hatch run package
 |---|---|
 | PySide6 >= 6.5.0 | Qt GUI framework |
 | requests >= 2.31.0 | HTTP client for Prowlarr API |
-| tomlkit >= 0.12.0 | TOML config with comment preservation |
 | colorama >= 0.4.6 | Colored test output |
 
 ---

@@ -27,9 +27,9 @@ HELP_HTML = """\
 <tr><td><b>C</b></td><td>Copy release title to clipboard</td></tr>
 <tr><td><b>G</b></td><td>Open web search for the title</td></tr>
 <tr><td><b>P</b></td><td>Play video file found by Everything</td></tr>
-<tr><td><b>F2</b></td><td>Run custom_command_F2 (config/app.local.toml)</td></tr>
-<tr><td><b>F3</b></td><td>Run custom_command_F3 (config/app.local.toml)</td></tr>
-<tr><td><b>F4</b></td><td>Run custom_command_F4 (config/app.local.toml)</td></tr>
+<tr><td><b>F2</b></td><td>Run custom_command_F2 (runtime config store)</td></tr>
+<tr><td><b>F3</b></td><td>Run custom_command_F3 (runtime config store)</td></tr>
+<tr><td><b>F4</b></td><td>Run custom_command_F4 (runtime config store)</td></tr>
 <tr><td><b>Tab</b></td><td>Jump to next title group</td></tr>
 <tr><td><b>Shift+Tab</b></td><td>Jump to previous title group</td></tr>
 <tr><td><b>Ctrl+A</b></td><td>Select all visible rows</td></tr>
@@ -41,7 +41,7 @@ HELP_HTML = """\
 </table>
 
 <h4>Custom Commands (F2/F3/F4)</h4>
-<p>Configure in <code>[settings]</code> section of config/app.local.toml:</p>
+<p>Configure in runtime config settings:</p>
 <pre>custom_command_F2 = 'my_script.bat "{title}" "{video}"'</pre>
 <p>Placeholders: <b>{title}</b> = release title, <b>{video}</b> = video file path
 from Everything (or empty)</p>

@@ -49,7 +49,7 @@ The UI remains responsive by running blocking operations in worker threads:
   - Deferred/retry timer references
   - Preferences persistence lifecycle
 - Utility modules own filesystem paths for:
-  - Config (`config/app.local.toml` with layered defaults/secrets)
+  - Config (typed QSettings runtime store with env secret overrides)
   - App/runtime logs (`<temp>/prowlarr-ui/prowlarr_ui.log`, `<temp>/prowlarr-ui/download_history.log`)
   - Everything SDK cache (`.everything_sdk`)
 

@@ -70,9 +70,12 @@ from prowlarr_ui.api.everything_search import EverythingSearch
 from prowlarr_ui.api.prowlarr_client import ProwlarrClient
 from prowlarr_ui.ui.help_text import HELP_HTML
 from prowlarr_ui.ui.log_window import LogWindow
+from prowlarr_ui.ui.setup_wizard import run_setup_wizard
 from prowlarr_ui.ui.widgets import NumericTableWidgetItem
 from prowlarr_ui.utils.config import (
+    config_store_file_path,
     ensure_config_exists,
+    get_missing_required_config,
     load_config,
     save_config,
     validate_config,
@@ -176,7 +179,7 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1400, 800)
         self.setWindowIcon(self._create_globe_icon())
 
-        # Load and validate configuration from TOML file
+        # Load and validate runtime configuration from QSettings.
         self.config = load_config()
         config_warnings = validate_config(self.config)
         for w in config_warnings:
@@ -3647,7 +3650,7 @@ class MainWindow(QMainWindow):
         self._persist_runtime_preferences()
         self._sync_preferences()
 
-        # Save TOML config (non-preference settings).
+        # Save runtime config store (non-preference settings).
         if self._save_config_with_retry():
             self.log("Application closing, configuration saved")
         else:
@@ -3670,13 +3673,24 @@ class MainWindow(QMainWindow):
 
 def main():
     """Application entry point"""
-    # Ensure config exists
+    # Ensure config keys exist in QSettings store.
     ensure_config_exists()
 
     # Setup logging
     setup_logging()
 
     app = QApplication(sys.argv)
+
+    # First-run setup wizard for required runtime config.
+    config_preview = load_config()
+    missing = get_missing_required_config(config_preview)
+    if missing:
+        configured = run_setup_wizard(config_preview)
+        if configured is None:
+            print("Setup wizard cancelled; required config is missing.")
+            print(f"Config INI path: {config_store_file_path()}")
+            raise SystemExit(1)
+        save_config(configured)
 
     # Create and show main window
     window = MainWindow()

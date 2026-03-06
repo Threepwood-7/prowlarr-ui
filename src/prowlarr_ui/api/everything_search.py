@@ -48,14 +48,25 @@ def find_everything_exe() -> str | None:
     return None
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SDK_DIR = str(PROJECT_ROOT / ".everything_sdk")
+def _resolve_sdk_dir() -> Path:
+    """Resolve SDK cache directory path for the current platform."""
+    if os.name == "nt":
+        appdata = os.getenv("APPDATA")
+        if appdata:
+            return Path(appdata) / "ProwlarrUI" / ".everything_sdk"
+        local_appdata = os.getenv("LOCALAPPDATA")
+        if local_appdata:
+            return Path(local_appdata) / "ProwlarrUI" / ".everything_sdk"
+    return Path.home() / ".prowlarr-ui" / ".everything_sdk"
+
+
+SDK_DIR = str(_resolve_sdk_dir())
 DEFAULT_SDK_URL = "https://www.voidtools.com/Everything-SDK.zip"
 DLL_NAME = "Everything64.dll"
 
 
 def _download_everything_sdk(sdk_url: str = DEFAULT_SDK_URL) -> str | None:
-    """Download Everything SDK zip and extract the DLL to .everything_sdk/"""
+    """Download Everything SDK zip and extract the DLL to the SDK cache directory."""
     try:
         logger.info(f"Downloading Everything SDK from {sdk_url}...")
         response = requests.get(sdk_url, timeout=30)
@@ -302,10 +313,7 @@ class EverythingSearch:
                     path = item.get("path", "")
 
                     # Combine to full name
-                    if path:
-                        full_name = os.path.join(path, name)
-                    else:
-                        full_name = name
+                    full_name = os.path.join(path, name) if path else name
 
                     # Get size - only for files, not folders
                     size = 0
