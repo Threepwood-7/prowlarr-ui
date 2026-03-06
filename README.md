@@ -4,9 +4,22 @@ A Windows desktop application for searching [Prowlarr](https://prowlarr.com/) in
 
 Built with PySide6 (Qt for Python).
 
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![PySide6](https://img.shields.io/badge/GUI-PySide6-green)
-![Windows](https://img.shields.io/badge/platform-Windows-lightgrey)
+## Table of Contents
+
+- [Features](#features)
+- [UI Walkthrough](#ui-walkthrough)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Everything Integration](#everything-integration)
+- [Keyboard Shortcuts](#keyboard-shortcuts)
+- [Menus](#menus)
+- [Project Structure](#project-structure)
+- [Architecture](#architecture)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
+- [Legal Disclaimer](#legal-disclaimer)
 
 ## Features
 
@@ -48,29 +61,45 @@ Built with PySide6 (Qt for Python).
 
 ## Installation
 
-1. Clone the repository and install tooling.
+### First-time Setup
 
-Bootstrap:
-
-```bash
-uv tool install hatch
+```bat
+python scripts\windows\setup_env.py
 ```
 
-Sync lockfile:
+Creates the `.venv` by running `uv sync --locked` (falls back to `uv sync` if no lockfile).
 
-```bash
-uv lock
+Manual alternative for development:
+
+```bat
+uv sync --group dev
 ```
 
-2. Start the app and complete the first-run setup wizard.
-
-3. Enter your Prowlarr host/API credentials (API key in Prowlarr under *Settings > General*).
+On first launch, a setup wizard prompts for your Prowlarr host and API credentials (API key in Prowlarr under *Settings > General*).
 
 ## Usage
 
-```bash
+### Recommended (console-less)
+
+```bat
+pyw scripts\windows\run_app_gui.pyw
+```
+
+Launches the GUI without a console window. Auto-bootstraps the `.venv` via `setup_env.py` if not yet created.
+
+### With console
+
+```bat
+python scripts\windows\run_app.py
+```
+
+Runs via `hatch run python -m prowlarr_ui`. Requires `hatch` in PATH.
+
+### Direct
+
+```bat
 python -m prowlarr_ui
-# or, after installation:
+:: or, after installation:
 prowlarr-ui
 ```
 
@@ -81,43 +110,6 @@ prowlarr-ui
 3. Results appear in the center table, color-grouped by title
 4. Press **Space** to download a result and advance to the next row
 5. Gray rows = already on disk (detected by Everything)
-
-### Keyboard Shortcuts
-
-These work when the results table is focused:
-
-| Key | Action |
-|---|---|
-| **Space** | Download current row, advance to next |
-| **S** | Launch Everything search for the title |
-| **C** | Copy release title to clipboard |
-| **G** | Open web search for the title |
-| **P** | Play video file found by Everything |
-| **Tab** | Jump to next title group |
-| **Shift+Tab** | Jump to previous title group |
-| **Ctrl+A** | Select all visible rows |
-| **Ctrl+F** | Find in table |
-| **F1** | Show help |
-| **F2 / F3 / F4** | Run custom commands (configurable) |
-
-### Menus
-
-**File** - Exit the application (Alt+X).
-
-**View**:
-- **Show Log** - Open the log window to view application messages
-- **Download History** - View the log of previously downloaded items
-- **Select Best per Group** - Highlight the best result in each title group (by seeders, fallback to size)
-- **Reset Sorting** - Restore default sort order (Title ASC, Indexer DESC, Age ASC)
-- **Reset View** - Reset column widths, splitter position, and sort order to defaults
-
-**Bookmarks** - Save and recall frequently used search queries:
-- **Add Bookmark** - Save the current search query
-- **Delete Bookmark** - Remove a saved bookmark
-- **Sort Bookmarks** - Sort all bookmarks alphabetically
-- Saved bookmarks appear as individual menu items for one-click re-search
-
-**Help** - Show the in-app help dialog (F1).
 
 ## Configuration
 
@@ -169,79 +161,146 @@ The `[preferences]` section is auto-saved on exit and includes search history, s
 
 **None**: Disable Everything integration entirely if you don't need duplicate detection.
 
+## Keyboard Shortcuts
+
+These work when the results table is focused:
+
+| Key | Action |
+|---|---|
+| **Space** | Download current row, advance to next |
+| **S** | Launch Everything search for the title |
+| **C** | Copy release title to clipboard |
+| **G** | Open web search for the title |
+| **P** | Play video file found by Everything |
+| **Tab** | Jump to next title group |
+| **Shift+Tab** | Jump to previous title group |
+| **Ctrl+A** | Select all visible rows |
+| **Ctrl+F** | Find in table |
+| **F1** | Show help |
+| **F2 / F3 / F4** | Run custom commands (configurable) |
+
+## Menus
+
+**File** - Exit the application (Alt+X).
+
+**View**:
+- **Show Log** - Open the log window to view application messages
+- **Download History** - View the log of previously downloaded items
+- **Select Best per Group** - Highlight the best result in each title group (by seeders, fallback to size)
+- **Reset Sorting** - Restore default sort order (Title ASC, Indexer DESC, Age ASC)
+- **Reset View** - Reset column widths, splitter position, and sort order to defaults
+
+**Bookmarks** - Save and recall frequently used search queries:
+- **Add Bookmark** - Save the current search query
+- **Delete Bookmark** - Remove a saved bookmark
+- **Sort Bookmarks** - Sort all bookmarks alphabetically
+- Saved bookmarks appear as individual menu items for one-click re-search
+
+**Help** - Show the in-app help dialog (F1).
+
 ## Project Structure
 
-```
-src/
-  prowlarr_ui/
-    __main__.py                    Module entrypoint for `python -m prowlarr_ui`
-    app.py                         Main entry point and UI (MainWindow)
-    api/
-      prowlarr_client.py           Prowlarr REST API client
-      everything_search.py         Everything SDK/HTTP integration
-    workers/
-      search_worker.py             Background search thread
-      everything_worker.py         Background Everything check thread
-      download_worker.py           Download queue processor
-    ui/
-      widgets.py                   Custom table widget for numeric sorting
-      log_window.py                Detachable log viewer window
-      help_text.py                 Help dialog content
-    utils/
-      config.py                    Typed QSettings config load/save
-      formatters.py                Size and age formatting utilities
-      logging_config.py            Rotating file log setup
-      quality_parser.py            Resolution/source/codec extraction from titles
-scripts/
-  windows/
-    run_app.py                     Standard app launcher (python -m prowlarr_ui)
-    run_app_gui.pyw                 Standard GUI launcher
-    run_tests.py                   Standard test runner
-docs/
-  architecture.md                  Threading and ownership model
-tests/
-  unit/                            Unit/regression tests
-  ui/                              pytest-qt UI tests
-  integration/                     Live/manual integration checks
-    test_integrations.py           Prowlarr + Everything connectivity script
-CONTRIBUTING.md                    Contribution and tooling workflow
+```text
+prowlarr-ui/
+|-- pyproject.toml
+|-- uv.lock
+|-- src/
+|   `-- prowlarr_ui/
+|       |-- __main__.py                    # Module entrypoint for python -m prowlarr_ui
+|       |-- app.py                         # Main entry point and UI (MainWindow)
+|       |-- api/
+|       |   |-- prowlarr_client.py         # Prowlarr REST API client
+|       |   `-- everything_search.py       # Everything SDK/HTTP integration
+|       |-- workers/
+|       |   |-- search_worker.py           # Background search thread
+|       |   |-- everything_worker.py       # Background Everything check thread
+|       |   `-- download_worker.py         # Download queue processor
+|       |-- ui/
+|       |   |-- widgets.py                 # Custom table widget for numeric sorting
+|       |   |-- log_window.py              # Detachable log viewer window
+|       |   `-- help_text.py               # Help dialog content
+|       `-- utils/
+|           |-- config.py                  # Typed QSettings config load/save
+|           |-- formatters.py              # Size and age formatting utilities
+|           |-- logging_config.py          # Rotating file log setup
+|           `-- quality_parser.py          # Resolution/source/codec extraction from titles
+|-- scripts/
+|   `-- windows/
+|       |-- setup_env.py                   # Create/verify .venv via uv sync
+|       |-- run_app.py                     # Launch app via hatch run
+|       |-- run_app_gui.pyw                # Launch GUI without console window
+|       `-- run_tests.py                   # Run tests via hatch run test
+|-- docs/
+|   `-- architecture.md                    # Threading and ownership model
+|-- tests/
+|   |-- unit/                              # Unit/regression tests
+|   |-- ui/                                # pytest-qt UI tests
+|   `-- integration/                       # Live/manual integration checks
+|       `-- test_integrations.py           # Prowlarr + Everything connectivity script
+`-- CONTRIBUTING.md                        # Contribution and tooling workflow
 ```
 
-## Packaging and Entrypoints
+## Architecture
+
+- `src/` layout with `prowlarr_ui` package.
+- `MainWindow` (`app.py`) is the composition root.
+- Background operations use dedicated worker threads (`QThread`-based):
+  - `search_worker` — Prowlarr API search.
+  - `everything_worker` — Everything SDK/HTTP duplicate checks.
+  - `download_worker` — Download queue processor.
+- `api/` contains external service integrations (Prowlarr REST, Everything SDK/HTTP).
+- `utils/` contains config management, formatting, logging, and quality parsing.
+- Rotating file-based logging via `logging_config.py`.
+
+### Packaging and Entrypoints
 
 - Build backend: **Hatchling** (`pyproject.toml`)
 - Canonical package/import path: `prowlarr_ui`
 - Dependency source of truth: `pyproject.toml`
 - Resolver/installer backend: **uv**
-- Lockfile: `uv.lock` (only)
+- Lockfile: `uv.lock`
 - Run commands:
   - `python -m prowlarr_ui`
   - `prowlarr-ui` (installed console script)
 
-Lockfile workflow:
+### Dependencies
 
-```bash
-uv lock
-uv lock --check
-```
+| Package | Purpose |
+|---|---|
+| PySide6 >= 6.5.0 | Qt GUI framework |
+| requests >= 2.31.0 | HTTP client for Prowlarr API |
+| colorama >= 0.4.6 | Colored test output |
 
-## Testing
+## Development
+
+### Windows Helpers
+
+| Script | Description |
+|---|---|
+| `python scripts\windows\setup_env.py` | Create/verify `.venv` via `uv sync --locked` |
+| `pyw scripts\windows\run_app_gui.pyw` | Launch GUI without console window (auto-bootstraps venv) |
+| `python scripts\windows\run_app.py` | Launch app via `hatch run` (requires hatch in PATH) |
+| `python scripts\windows\run_tests.py` | Run test suite via `hatch run test` |
+
+### Testing
 
 Run the integration tests to verify your Prowlarr and Everything connections:
 
-```bash
-python tests/integration/test_integrations.py
+```bat
+python tests\integration\test_integrations.py
 ```
 
 Run the automated headless UI tests (mocked, no live Prowlarr/Everything required):
 
-```bash
+```bat
 hatch run test
 ```
 
+### Quality Checks
+
 Run CI-equivalent quality gates locally:
 
-```bash
+```bat
 hatch run lint
 hatch run format-check
 hatch run typecheck
@@ -251,15 +310,31 @@ hatch run audit-clean
 hatch run package
 ```
 
-## Dependencies
+### Lockfile Workflow
 
-| Package | Purpose |
-|---|---|
-| PySide6 >= 6.5.0 | Qt GUI framework |
-| requests >= 2.31.0 | HTTP client for Prowlarr API |
-| colorama >= 0.4.6 | Colored test output |
+```bat
+uv lock
+uv lock --check
+```
 
----
+## Troubleshooting
+
+### Prowlarr connection errors
+
+- Verify the URL includes `http://` or `https://`
+- Verify the API key is valid (Prowlarr > Settings > General > API Key)
+- Confirm Prowlarr is reachable from this machine
+
+### Everything not detecting files
+
+- Ensure Everything is running (SDK mode requires the Everything process)
+- For HTTP mode, enable the HTTP server in Everything: *Tools > Options > HTTP Server*
+- Check `everything_integration_method` in settings (`"sdk"`, `"http"`, or `"none"`)
+
+### Config issues
+
+- On first run, the setup wizard should prompt for credentials
+- Use *Tools > Edit .ini file* to manually edit the config
 
 ---
 
