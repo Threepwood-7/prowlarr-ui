@@ -19,11 +19,25 @@ Built with PySide6 (Qt for Python).
 - **Custom commands** - bind F2/F3/F4 to your own scripts with `{title}` and `{video}` placeholders
 - **Paginated results** - navigate through large result sets page by page or load all pages at once
 
-## Screenshot
+## UI Walkthrough
 
-![Prowlarr Search Client](docs/images/prowlarr_ui_screenshot.jpg)
+1. Configure query, indexers, and categories, then review result quality.
 
-*Left panel with search controls and filters, center results table with color-coded title grouping, and a detachable log window.*
+   ![Configure query and review results](docs/images/ui-01-overview.png)
+
+   Overview state with search controls, grouped results, and key quality columns.
+
+2. Filter duplicates and verify already-on-disk matches.
+
+   ![Filter duplicates and verify matches](docs/images/ui-02-workflow.png)
+
+   Workflow state with Everything-marked rows for safe duplicate-aware selection.
+
+3. Execute download actions from a focused queue.
+
+   ![Execute download actions](docs/images/ui-03-details.png)
+
+   Action-focused state for selecting rows and triggering downloads confidently.
 
 ## Requirements
 
@@ -267,7 +281,6 @@ hatch run package
 | requests >= 2.31.0 | HTTP client for Prowlarr API |
 | tomlkit >= 0.12.0 | TOML config with comment preservation |
 | colorama >= 0.4.6 | Colored test output |
-
 
 ---
 
