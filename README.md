@@ -226,8 +226,6 @@ CONTRIBUTING.md                    Contribution and tooling workflow
   - `python -m prowlarr_ui`
   - `prowlarr-ui` (installed console script)
 
-No Nox is used in this project.
-
 Lockfile workflow:
 
 ```bash
@@ -272,8 +270,6 @@ hatch run package
 
 
 ---
-
-**Tags:** prowlarr, prowlarr-client, prowlarr-gui, prowlarr-search, usenet, torrent, nzb, indexer, newznab, torznab, pyside6, qt, desktop-app, windows, everything-search, voidtools, duplicate-detection, batch-download, nzb-download, torrent-search, usenet-search, python, search-client, prowlarr-api
 
 ---
 
