@@ -232,10 +232,7 @@ prowlarr-ui/
 |       |   |-- log_window.py              # Detachable log viewer window
 |       |   `-- help_text.py               # Help dialog content
 |       `-- utils/
-|           |-- config.py                  # Typed QSettings config load/save
-|           |-- formatters.py              # Size and age formatting utilities
-|           |-- logging_config.py          # Rotating file log setup
-|           `-- quality_parser.py          # Resolution/source/codec extraction from titles
+|           `-- config.py                  # Typed QSettings config load/save
 |-- scripts/
 |   `-- windows/
 |       |-- setup_env.py                   # Create/verify .venv via uv sync
@@ -261,8 +258,8 @@ prowlarr-ui/
   - `everything_worker` — Everything SDK/HTTP duplicate checks.
   - `download_worker` — Download queue processor.
 - `api/` contains external service integrations (Prowlarr REST, Everything SDK/HTTP).
-- `utils/` contains config management, formatting, logging, and quality parsing.
-- Rotating file-based logging via `logging_config.py`.
+- `utils/` contains app-specific config management.
+- Shared runtime/logging/quality/formatter helpers are provided by `threep_commons`.
 
 ### Packaging and Entrypoints
 

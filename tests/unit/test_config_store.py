@@ -3,13 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
+from threep_commons.paths import configure_qsettings
 
-from prowlarr_ui.runtime_paths import SETTINGS_APP_NAME, SETTINGS_ORG_NAME, configure_qsettings
+from prowlarr_ui.constants import APP_IDENTITY, SETTINGS_APP_NAME, SETTINGS_ORG_NAME
 from prowlarr_ui.utils.config import ensure_config_exists, load_config, save_config
 
 
 def _settings_file(config_dir: Path) -> Path:
-    configure_qsettings(str(config_dir))
+    configure_qsettings(APP_IDENTITY, str(config_dir))
     settings = QSettings(
         QSettings.Format.IniFormat,
         QSettings.Scope.UserScope,

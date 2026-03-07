@@ -16,8 +16,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from threep_commons.logging import resolve_log_path
 
-from prowlarr_ui.utils.logging_config import LOG_FILE_PATH
+from prowlarr_ui.constants import APP_IDENTITY
+
+LOG_FILE_PATH = str(resolve_log_path(APP_IDENTITY, APP_IDENTITY.default_log_filename))
 
 logger = logging.getLogger(__name__)
 

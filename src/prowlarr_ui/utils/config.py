@@ -5,15 +5,29 @@ from __future__ import annotations
 import copy
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QSettings
-
-from prowlarr_ui.runtime_paths import (
-    SETTINGS_APP_NAME,
-    SETTINGS_ORG_NAME,
-    configure_qsettings,
+from threep_commons.config_helpers import (
+    coerce_bool as _shared_coerce_bool,
 )
+from threep_commons.config_helpers import (
+    coerce_value as _shared_coerce_value,
+)
+from threep_commons.config_helpers import (
+    deep_merge_dicts as _shared_deep_merge_dicts,
+)
+from threep_commons.config_helpers import (
+    schema_key_path as _shared_schema_key_path,
+)
+from threep_commons.config_helpers import (
+    set_nested_value as _shared_set_nested_value,
+)
+from threep_commons.qsettings_store import create_qsettings, qsettings_store_file_path
+
+from prowlarr_ui.constants import APP_IDENTITY, SETTINGS_APP_NAME, SETTINGS_ORG_NAME
+
+if TYPE_CHECKING:
+    from PySide6.QtCore import QSettings
 
 logger = logging.getLogger(__name__)
 
@@ -147,80 +161,37 @@ CONFIG_SCHEMA: tuple[tuple[str, type, Any], ...] = (
 
 
 def _new_config_settings() -> QSettings:
-    configure_qsettings()
-    return QSettings(
-        QSettings.Format.IniFormat,
-        QSettings.Scope.UserScope,
-        CONFIG_SETTINGS_ORG_NAME,
-        CONFIG_SETTINGS_APP_NAME,
+    return create_qsettings(
+        APP_IDENTITY,
+        app_name=CONFIG_SETTINGS_APP_NAME,
     )
 
 
 def config_store_file_path() -> str:
-    settings = _new_config_settings()
-    settings.sync()
-    return str(settings.fileName() or "").strip()
+    return qsettings_store_file_path(
+        APP_IDENTITY,
+        app_name=CONFIG_SETTINGS_APP_NAME,
+    )
 
 
 def _set_nested_value(target: dict[str, Any], key_path: tuple[str, ...], value: Any) -> None:
-    current: dict[str, Any] = target
-    for key in key_path[:-1]:
-        next_value = current.get(key)
-        if not isinstance(next_value, dict):
-            next_value = {}
-            current[key] = next_value
-        current = next_value
-    current[key_path[-1]] = value
+    _shared_set_nested_value(target, key_path, value)
 
 
 def _schema_config_path(schema_key: str) -> tuple[str, ...]:
-    parts = tuple(schema_key.split("/"))
-    if parts and parts[0] == "config":
-        return parts[1:]
-    return parts
+    return _shared_schema_key_path(schema_key)
 
 
 def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    merged: dict[str, Any] = dict(base)
-    for key, value in overlay.items():
-        base_value = merged.get(key)
-        if isinstance(base_value, dict) and isinstance(value, dict):
-            merged[key] = _deep_merge_dicts(base_value, value)
-        else:
-            merged[key] = value
-    return merged
+    return _shared_deep_merge_dicts(base, overlay)
 
 
 def _coerce_bool(value: Any, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        token = value.strip().lower()
-        if token in {"1", "true", "yes", "on"}:
-            return True
-        if token in {"0", "false", "no", "off"}:
-            return False
-    return bool(default)
+    return _shared_coerce_bool(value, default)
 
 
 def _coerce_value(value: Any, expected_type: type, default: Any) -> Any:
-    if expected_type is bool:
-        return _coerce_bool(value, bool(default))
-    if expected_type is int:
-        try:
-            return int(value)
-        except (TypeError, ValueError, OverflowError):
-            return int(default)
-    if expected_type is float:
-        try:
-            return float(value)
-        except (TypeError, ValueError, OverflowError):
-            return float(default)
-    if value is None:
-        return default
-    return str(value)
+    return _shared_coerce_value(value, expected_type, default)
 
 
 def _apply_secret_env_overrides(config: dict[str, Any]) -> None:

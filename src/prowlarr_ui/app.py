@@ -62,14 +62,19 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from threep_commons.formatters import format_age, format_size
+from threep_commons.logging import resolve_log_path, setup_logging_from_identity
+from threep_commons.paths import configure_qsettings
+from threep_commons.qt.slots import safe_slot
+from threep_commons.quality import parse_quality
 
 from prowlarr_ui.api.everything_search import EverythingSearch
 from prowlarr_ui.api.prowlarr_client import ProwlarrClient
+from prowlarr_ui.constants import APP_IDENTITY, SETTINGS_APP_NAME, SETTINGS_ORG_NAME
 from prowlarr_ui.ui.help_text import HELP_HTML
 from prowlarr_ui.ui.log_window import LogWindow
 from prowlarr_ui.ui.setup_wizard import run_setup_wizard
 from prowlarr_ui.ui.widgets import NumericTableWidgetItem
-from prowlarr_ui.runtime_paths import SETTINGS_APP_NAME, SETTINGS_ORG_NAME, configure_qsettings
 from prowlarr_ui.utils.config import (
     config_store_file_path,
     ensure_config_exists,
@@ -78,16 +83,12 @@ from prowlarr_ui.utils.config import (
     save_config,
     validate_config,
 )
-from prowlarr_ui.utils.formatters import format_age, format_size
-
-# Import from modular structure
-from prowlarr_ui.utils.logging_config import DOWNLOAD_HISTORY_PATH, setup_logging
-from prowlarr_ui.utils.qt_slots import safe_slot
-from prowlarr_ui.utils.quality_parser import parse_quality
 from prowlarr_ui.workers.download_worker import DownloadWorker
 from prowlarr_ui.workers.everything_worker import EverythingCheckWorker
 from prowlarr_ui.workers.init_worker import InitWorker
 from prowlarr_ui.workers.search_worker import SearchWorker
+
+DOWNLOAD_HISTORY_PATH = str(resolve_log_path(APP_IDENTITY, "download_history.log"))
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        configure_qsettings()
+        configure_qsettings(APP_IDENTITY)
         self.setWindowTitle("Prowlarr Search Client")
         self.setGeometry(100, 100, 1400, 800)
         self.setWindowIcon(self._create_globe_icon())
@@ -3610,13 +3611,13 @@ class MainWindow(QMainWindow):
 
 def main():
     """Application entry point"""
-    configure_qsettings()
+    configure_qsettings(APP_IDENTITY)
 
     # Ensure config keys exist in QSettings store.
     ensure_config_exists()
 
     # Setup logging
-    setup_logging()
+    setup_logging_from_identity(APP_IDENTITY)
 
     app = QApplication(sys.argv)
 

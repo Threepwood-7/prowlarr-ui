@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from threep_commons.paths import resolve_app_data_dir
 
-from prowlarr_ui.runtime_paths import resolve_app_data_dir
+from prowlarr_ui.constants import APP_IDENTITY
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ def find_everything_exe() -> str | None:
 
 def _resolve_sdk_dir() -> Path:
     """Resolve SDK cache directory path under the app data root."""
-    return resolve_app_data_dir() / ".everything_sdk"
+    return resolve_app_data_dir(APP_IDENTITY) / ".everything_sdk"
 
 
 SDK_DIR = str(_resolve_sdk_dir())
