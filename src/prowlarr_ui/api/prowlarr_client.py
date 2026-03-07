@@ -131,7 +131,7 @@ class ProwlarrClient:
                     wait = 2**attempt
                     logger.warning(f"Connection error: {e}, retrying in {wait}s (attempt {attempt}/{max_attempts})")
                     if self._sleep_with_cancel(wait, should_cancel):
-                        raise RuntimeError("Prowlarr request cancelled")
+                        raise RuntimeError("Prowlarr request cancelled") from None
                 else:
                     raise
 

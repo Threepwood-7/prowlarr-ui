@@ -13,7 +13,7 @@ import time
 import traceback
 import webbrowser
 from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import quote
 
 from PySide6.QtCore import (
@@ -112,7 +112,17 @@ class MainWindow(QMainWindow):
     COL_INDEXER = 7
     COL_DOWNLOAD = 8
     COL_COUNT = 9
-    COL_HEADERS = ["Age", "Title", "Quality", "Size", "Seeders", "Leechers", "Grabs", "Indexer", "Download"]
+    COL_HEADERS: ClassVar[list[str]] = [
+        "Age",
+        "Title",
+        "Quality",
+        "Size",
+        "Seeders",
+        "Leechers",
+        "Grabs",
+        "Indexer",
+        "Download",
+    ]
 
     def __init__(self):
         super().__init__()
@@ -383,9 +393,8 @@ class MainWindow(QMainWindow):
                 hidden = True
 
             # Title text filter
-            if not hidden and title_filter and title_item:
-                if title_filter not in title_item.text().lower():
-                    hidden = True
+            if not hidden and title_filter and title_item and title_filter not in title_item.text().lower():
+                hidden = True
 
             # Min size filter
             if not hidden and min_size_bytes > 0:
@@ -430,10 +439,8 @@ class MainWindow(QMainWindow):
     def on_prowlarr_page_number_changed(self, value: int):
         """Handle page number change - fetch specific page"""
         # Only fetch if we have a current query and this isn't the initial setup
-        if hasattr(self, "query_input") and self.query_input.text().strip():
-            # Don't trigger if we're already in a search operation
-            if not self.current_worker:
-                self.fetch_page(value)
+        if hasattr(self, "query_input") and self.query_input.text().strip() and not self.current_worker:
+            self.fetch_page(value)
 
     def setup_ui(self):
         """Build the main UI layout"""
@@ -2095,10 +2102,9 @@ class MainWindow(QMainWindow):
         """Merge/queue a targeted recheck payload for later execution."""
         if not title_keys:
             return
-        if expected := self._pending_everything_recheck:
-            if expected.get("generation") == generation:
-                expected["title_keys"].update(title_keys)
-                return
+        if (expected := self._pending_everything_recheck) and expected.get("generation") == generation:
+            expected["title_keys"].update(title_keys)
+            return
         self._pending_everything_recheck = {"title_keys": set(title_keys), "generation": generation}
 
     def _run_deferred_everything_recheck(self):
@@ -2223,7 +2229,7 @@ class MainWindow(QMainWindow):
                 if item:
                     item.setBackground(color)
 
-    def _recheck_everything_for_titles(self, title_keys: set, expected_generation: int = None):
+    def _recheck_everything_for_titles(self, title_keys: set, expected_generation: int | None = None):
         """
         Re-check Everything for all rows matching any of the given title prefixes.
         Called after download with configurable delay.
@@ -2532,7 +2538,7 @@ class MainWindow(QMainWindow):
     @safe_slot
     def download_selected(self):
         """Download all selected releases via the background queue"""
-        selected_rows = sorted(set(idx.row() for idx in self.results_table.selectedIndexes()))
+        selected_rows = sorted({idx.row() for idx in self.results_table.selectedIndexes()})
         if not selected_rows:
             self.status_label.setText("No rows selected")
             return
@@ -2595,7 +2601,7 @@ class MainWindow(QMainWindow):
         # Select the best rows
         count = 0
         sel_model = self.results_table.selectionModel()
-        for title_key, (row, _, _) in groups.items():
+        for _title_key, (row, _, _) in groups.items():
             for col in range(self.COL_COUNT):
                 idx = self.results_table.model().index(row, col)
                 sel_model.select(idx, sel_model.SelectionFlag.Select)
@@ -2939,7 +2945,7 @@ class MainWindow(QMainWindow):
         self.download_all_btn.setEnabled(has_visible_downloadable)
 
         # Download Selected: enabled only when selected rows include an actionable row.
-        selected_rows = set(idx.row() for idx in self.results_table.selectedIndexes())
+        selected_rows = {idx.row() for idx in self.results_table.selectedIndexes()}
         has_selected_downloadable = any(is_row_downloadable(row) for row in selected_rows)
         self.download_selected_btn.setEnabled(has_selected_downloadable)
 
@@ -2952,7 +2958,7 @@ class MainWindow(QMainWindow):
                 return title_item.text()
         return None
 
-    VIDEO_EXTENSIONS = {
+    VIDEO_EXTENSIONS: ClassVar[set[str]] = {
         ".mkv",
         ".mp4",
         ".avi",
