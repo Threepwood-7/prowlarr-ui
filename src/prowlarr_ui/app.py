@@ -63,6 +63,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from threep_commons.formatters import format_age, format_size
+from threep_commons.files import open_path_in_default_app
 from threep_commons.logging import resolve_log_path, setup_logging_from_identity
 from threep_commons.paths import configure_qsettings
 from threep_commons.qt.slots import safe_slot
@@ -2894,12 +2895,8 @@ class MainWindow(QMainWindow):
     def _open_file_with_default_app(self, file_path: str):
         """Open a file using the OS default application."""
         try:
-            if sys.platform == "win32":
-                os.startfile(file_path)
-            elif sys.platform == "darwin":  # macOS
-                subprocess.run(["open", file_path], check=True)
-            else:  # Linux and others
-                subprocess.run(["xdg-open", file_path], check=True)
+            if not open_path_in_default_app(file_path):
+                raise RuntimeError("No default opener available")
         except Exception as e:
             logger.error(f"Failed to open file: {e}")
             self.status_label.setText(f"Cannot open file: {e}")
@@ -3045,7 +3042,7 @@ class MainWindow(QMainWindow):
         def _play_video():
             try:
                 if video_path:
-                    os.startfile(video_path)
+                    open_path_in_default_app(video_path)
             except Exception as e:
                 logger.error(f"Failed to play video: {e}")
 
@@ -3226,7 +3223,7 @@ class MainWindow(QMainWindow):
                 if video_path:
                     self.log(f"Playing: {video_path}")
                     self.status_label.setText(f"Playing: {os.path.basename(video_path)}")
-                    os.startfile(video_path)
+                    open_path_in_default_app(video_path)
                 else:
                     self.status_label.setText("No video file found in Everything results")
                 event.accept()

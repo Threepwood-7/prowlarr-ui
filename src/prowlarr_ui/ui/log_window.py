@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from threep_commons.files import open_path_in_default_app
 from threep_commons.logging import resolve_log_path
 
 from prowlarr_ui.constants import APP_IDENTITY
@@ -135,7 +136,8 @@ class LogWindow(QWidget):
         try:
             log_path = LOG_FILE_PATH
             if os.path.exists(log_path):
-                os.startfile(log_path)
+                if not open_path_in_default_app(log_path):
+                    self.append_log(f"Failed to open log file: {log_path}")
             else:
                 self.append_log(f"Log file not found: {log_path}")
         except Exception as e:

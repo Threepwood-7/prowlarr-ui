@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from threep_commons.executables import find_first_available_executable, program_files_candidates
 from threep_commons.paths import resolve_app_data_dir
 
 from prowlarr_ui.constants import APP_IDENTITY
@@ -22,31 +23,13 @@ def find_everything_exe() -> str | None:
     Find Everything.exe in common installation paths or PATH
     Returns full path if found, None otherwise
     """
-    # Common installation paths
-    common_paths = [
-        r"C:\Program Files\Everything\Everything.exe",
-        r"C:\Program Files (x86)\Everything\Everything.exe",
-        os.path.expandvars(r"%PROGRAMFILES%\Everything\Everything.exe"),
-        os.path.expandvars(r"%PROGRAMFILES(X86)%\Everything\Everything.exe"),
-    ]
-
-    # Check common paths first
-    for path in common_paths:
-        if os.path.exists(path):
-            logger.info(f"Found Everything.exe at: {path}")
-            return path
-
-    # Fall back to PATH
-    try:
-        import shutil
-
-        exe_path = shutil.which("Everything.exe")
-        if exe_path:
-            logger.info(f"Found Everything.exe in PATH: {exe_path}")
-            return exe_path
-    except Exception as e:
-        logger.warning(f"Failed to search PATH for Everything.exe: {e}")
-
+    exe_path = find_first_available_executable(
+        command_names=("Everything.exe",),
+        candidate_paths=program_files_candidates(Path("Everything") / "Everything.exe"),
+    )
+    if exe_path is not None:
+        logger.info(f"Found Everything.exe at: {exe_path}")
+        return str(exe_path)
     logger.warning("Everything.exe not found")
     return None
 
