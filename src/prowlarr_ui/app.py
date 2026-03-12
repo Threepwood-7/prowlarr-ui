@@ -2454,7 +2454,7 @@ class MainWindow(QMainWindow):
                 if item:
                     item.setBackground(color)
 
-    def _recheck_everything_for_titles(  # noqa: C901 - Everything recheck orchestration
+    def _recheck_everything_for_titles(
         self, title_keys: set, expected_generation: int | None = None
     ):
         """
@@ -2888,9 +2888,7 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Selected best release from {count} title groups")
         self.log(f"Select best per group: {count} groups")
 
-    def start_download_queue(  # noqa: C901 - queue startup spans retries and UI state
-        self, items: list[dict], retry_attempt: int = 0
-    ):
+    def start_download_queue(self, items: list[dict], retry_attempt: int = 0):
         """Start background download worker with a list of items, or append to running queue"""
         if self._block_if_shutting_down():
             return
@@ -3489,7 +3487,7 @@ class MainWindow(QMainWindow):
                 return True
         return super().eventFilter(obj, event)
 
-    def table_key_press(self, event):  # noqa: C901 - keyboard shortcut router
+    def table_key_press(self, event):
         """
         Handle keyboard shortcuts in results table
         Space: Download current row and move to next
@@ -3727,7 +3725,7 @@ class MainWindow(QMainWindow):
         self._close_retry_pending = False
         self._close_retry_timer = None
 
-    def closeEvent(self, event):  # noqa: C901 - shutdown path coordinates many subsystems
+    def closeEvent(self, event):
         """
         Handle application close event
         Save preferences before exiting
