@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from threep_commons.executables import find_first_available_executable, program_files_candidates
+from threep_commons.executables import (
+    find_first_available_executable,
+    program_files_candidates,
+)
 from threep_commons.paths import resolve_app_data_dir
 
 from prowlarr_ui.constants import APP_IDENTITY
@@ -134,7 +137,9 @@ class EverythingSearch:
             logger.info("Everything integration: using HTTP only")
             self._init_http()
         else:
-            logger.warning(f"Unknown Everything integration method '{integration_method}', trying SDK")
+            logger.warning(
+                f"Unknown Everything integration method '{integration_method}', trying SDK"
+            )
             self._init_sdk()
 
     def _init_sdk(self):
@@ -162,7 +167,10 @@ class EverythingSearch:
             self.dll.Everything_GetResultPathW.restype = ctypes.c_wchar_p
 
             # Size retrieval - use proper LARGE_INTEGER handling
-            self.dll.Everything_GetResultSize.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_longlong)]
+            self.dll.Everything_GetResultSize.argtypes = [
+                ctypes.c_uint,
+                ctypes.POINTER(ctypes.c_longlong),
+            ]
             self.dll.Everything_GetResultSize.restype = ctypes.c_bool
 
             # Request flags - ensure size is included in results
@@ -172,7 +180,9 @@ class EverythingSearch:
 
             self.dll.Everything_SetRequestFlags.argtypes = [ctypes.c_uint]
             self.dll.Everything_SetRequestFlags(
-                everything_request_file_name | everything_request_path | everything_request_size
+                everything_request_file_name
+                | everything_request_path
+                | everything_request_size
             )
 
             self.sdk_available = True
@@ -191,7 +201,9 @@ class EverythingSearch:
         except Exception as e:
             logger.warning(f"Everything HTTP server not available: {e}")
 
-    def search(self, query: str, everything_max_results: int = 10) -> list[tuple[str, int]]:
+    def search(
+        self, query: str, everything_max_results: int = 10
+    ) -> list[tuple[str, int]]:
         """
         Search for files or folders
         Returns list of tuples (filename, size_in_bytes)
@@ -214,7 +226,9 @@ class EverythingSearch:
 
         return []
 
-    def _search_sdk(self, query: str, everything_max_results: int) -> list[tuple[str, int]]:
+    def _search_sdk(
+        self, query: str, everything_max_results: int
+    ) -> list[tuple[str, int]]:
         """Search using SDK and return list of (filename, size) tuples.
         Thread-safe: uses a lock to serialize access to the SDK's global state."""
         with self._lock:
@@ -248,7 +262,9 @@ class EverythingSearch:
 
                     # Get file size using LARGE_INTEGER
                     size_value = ctypes.c_longlong()
-                    size_retrieved = self.dll.Everything_GetResultSize(i, ctypes.byref(size_value))
+                    size_retrieved = self.dll.Everything_GetResultSize(
+                        i, ctypes.byref(size_value)
+                    )
 
                     # Extract size - handle negative values (very large files)
                     if size_retrieved:
@@ -266,7 +282,9 @@ class EverythingSearch:
                 logger.error(f"SDK search failed: {e}")
                 return []
 
-    def _search_http(self, query: str, everything_max_results: int) -> list[tuple[str, int]]:
+    def _search_http(
+        self, query: str, everything_max_results: int
+    ) -> list[tuple[str, int]]:
         """Search using HTTP API and return list of (filename, size) tuples"""
         try:
             # Request size and path information from Everything HTTP server
@@ -300,7 +318,12 @@ class EverythingSearch:
 
                     if item_type != "folder":
                         # Try to get size from various possible field names
-                        for size_field in ["size", "size_bytes", "filesize", "file_size"]:
+                        for size_field in [
+                            "size",
+                            "size_bytes",
+                            "filesize",
+                            "file_size",
+                        ]:
                             if size_field in item:
                                 size_value = item[size_field]
                                 # Convert to int if it's a string

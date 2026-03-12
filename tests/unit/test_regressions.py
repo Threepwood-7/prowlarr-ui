@@ -51,21 +51,21 @@ def test_start_search_blocks_when_no_indexers_selected(window):
 
 
 def test_persist_runtime_preferences_skips_unloaded_tree_overwrite(window):
-    window.preferences_store.set_value(window._pref_key("selected_indexers"), [101, 202])
+    window.preferences_store.set_value(
+        window._pref_key("selected_indexers"), [101, 202]
+    )
     window.preferences_store.set_value(window._pref_key("selected_categories"), [3030])
 
     window._indexers_loaded = False
     window._categories_loaded = False
     window._persist_runtime_preferences()
 
-    assert (
-        window.preferences_store.get_int_list(window._pref_key("selected_indexers"), None)
-        == [101, 202]
-    )
-    assert (
-        window.preferences_store.get_int_list(window._pref_key("selected_categories"), None)
-        == [3030]
-    )
+    assert window.preferences_store.get_int_list(
+        window._pref_key("selected_indexers"), None
+    ) == [101, 202]
+    assert window.preferences_store.get_int_list(
+        window._pref_key("selected_categories"), None
+    ) == [3030]
 
 
 def test_video_paths_are_keyed_by_release_identity_not_title(window):
@@ -134,7 +134,15 @@ def test_search_worker_preserves_explicit_empty_filter_lists():
     captured = {}
 
     class FakeClient:
-        def search(self, query, indexer_ids=None, categories=None, offset=0, limit=1000, should_cancel=None):
+        def search(
+            self,
+            query,
+            indexer_ids=None,
+            categories=None,
+            offset=0,
+            limit=1000,
+            should_cancel=None,
+        ):
             captured["query"] = query
             captured["indexer_ids"] = indexer_ids
             captured["categories"] = categories
@@ -156,7 +164,9 @@ def test_prowlarr_client_search_includes_explicit_empty_filters():
     client = ProwlarrClient("http://localhost:9696", "api")
     captured = {}
 
-    def fake_api_request(endpoint, params=None, method="GET", data=None, should_cancel=None):
+    def fake_api_request(
+        endpoint, params=None, method="GET", data=None, should_cancel=None
+    ):
         captured["endpoint"] = endpoint
         captured["params"] = dict(params or {})
         return []

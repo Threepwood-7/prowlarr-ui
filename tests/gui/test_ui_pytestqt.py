@@ -23,7 +23,10 @@ def test_start_search_blocked_while_download_queue_running(window):
     window.query_input.setText("some query")
     window.start_search()
 
-    assert "Cannot start a new search while downloads are running" in window.status_label.text()
+    assert (
+        "Cannot start a new search while downloads are running"
+        in window.status_label.text()
+    )
     assert window.current_worker is None
     window.download_worker = None
 
@@ -40,7 +43,10 @@ def test_start_search_blocked_while_download_worker_reference_exists(window):
     window.query_input.setText("some query")
     window.start_search()
 
-    assert "Cannot start a new search while downloads are running" in window.status_label.text()
+    assert (
+        "Cannot start a new search while downloads are running"
+        in window.status_label.text()
+    )
     assert window.current_worker is None
     window.download_worker = None
 
@@ -48,7 +54,9 @@ def test_start_search_blocked_while_download_worker_reference_exists(window):
 def test_collect_row_download_item_accepts_zero_indexer_id(window):
     row = window.results_table.rowCount()
     window.results_table.insertRow(row)
-    window.results_table.setItem(row, window.COL_TITLE, QTableWidgetItem("Release Zero"))
+    window.results_table.setItem(
+        row, window.COL_TITLE, QTableWidgetItem("Release Zero")
+    )
 
     btn = QPushButton("Download")
     btn.setProperty("guid", "guid-zero")
@@ -60,7 +68,9 @@ def test_collect_row_download_item_accepts_zero_indexer_id(window):
     assert item == {"guid": "guid-zero", "indexer_id": 0, "title": "Release Zero"}
 
 
-def test_start_download_queue_dedupes_initial_items_and_progress(window, mocked_main, monkeypatch):
+def test_start_download_queue_dedupes_initial_items_and_progress(
+    window, mocked_main, monkeypatch
+):
     captured = {}
 
     class FakeDownloadWorker(QThread):
@@ -118,7 +128,9 @@ def test_start_everything_check_only_defers_for_older_generation(window):
 def test_download_buttons_only_enabled_for_actionable_rows(window):
     row = window.results_table.rowCount()
     window.results_table.insertRow(row)
-    window.results_table.setItem(row, window.COL_TITLE, QTableWidgetItem("Already Downloaded"))
+    window.results_table.setItem(
+        row, window.COL_TITLE, QTableWidgetItem("Already Downloaded")
+    )
 
     btn = QPushButton("Download")
     btn.setProperty("guid", "guid-downloaded")
@@ -134,7 +146,9 @@ def test_download_buttons_only_enabled_for_actionable_rows(window):
 
 
 def test_view_menu_includes_fit_columns_action(window):
-    view_action = next((a for a in window.menuBar().actions() if a.text() == "&View"), None)
+    view_action = next(
+        (a for a in window.menuBar().actions() if a.text() == "&View"), None
+    )
     assert view_action is not None
     view_menu = view_action.menu()
     assert view_menu is not None
@@ -142,7 +156,9 @@ def test_view_menu_includes_fit_columns_action(window):
 
 
 def test_tools_menu_includes_edit_ini_action(window):
-    tools_action = next((a for a in window.menuBar().actions() if a.text() == "&Tools"), None)
+    tools_action = next(
+        (a for a in window.menuBar().actions() if a.text() == "&Tools"), None
+    )
     assert tools_action is not None
     tools_menu = tools_action.menu()
     assert tools_menu is not None
@@ -150,7 +166,9 @@ def test_tools_menu_includes_edit_ini_action(window):
 
 
 def test_file_menu_exit_shortcuts_are_ctrl_q_and_alt_x(window):
-    file_action = next((a for a in window.menuBar().actions() if a.text() == "&File"), None)
+    file_action = next(
+        (a for a in window.menuBar().actions() if a.text() == "&File"), None
+    )
     assert file_action is not None
     file_menu = file_action.menu()
     assert file_menu is not None
@@ -166,7 +184,9 @@ def test_dynamic_bookmark_label_escapes_ampersand(window):
     window.query_input.setText(query)
     window._add_bookmark()
 
-    dynamic_action = next((a for a in window.bookmarks_menu.actions() if a.data() == query), None)
+    dynamic_action = next(
+        (a for a in window.bookmarks_menu.actions() if a.data() == query), None
+    )
     assert dynamic_action is not None
     assert dynamic_action.text() == "Rock && Roll"
 
@@ -174,9 +194,13 @@ def test_dynamic_bookmark_label_escapes_ampersand(window):
 def test_fit_columns_resizes_visible_columns_and_persists_widths(window):
     row = window.results_table.rowCount()
     window.results_table.insertRow(row)
-    window.results_table.setItem(row, window.COL_TITLE, QTableWidgetItem("Some.Release.2026"))
     window.results_table.setItem(
-        row, window.COL_INDEXER, QTableWidgetItem("VeryLongIndexerNameForFitColumnsRegressionTest")
+        row, window.COL_TITLE, QTableWidgetItem("Some.Release.2026")
+    )
+    window.results_table.setItem(
+        row,
+        window.COL_INDEXER,
+        QTableWidgetItem("VeryLongIndexerNameForFitColumnsRegressionTest"),
     )
 
     window.results_table.setColumnWidth(window.COL_INDEXER, 40)
@@ -187,7 +211,10 @@ def test_fit_columns_resizes_visible_columns_and_persists_widths(window):
     after = window.results_table.columnWidth(window.COL_INDEXER)
     assert after >= before
     assert "fitted visible columns" in window.status_label.text().lower()
-    saved = window.preferences_store.get_int_list(window._pref_key("column_widths"), []) or []
+    saved = (
+        window.preferences_store.get_int_list(window._pref_key("column_widths"), [])
+        or []
+    )
     assert len(saved) == window.COL_COUNT - 1
 
 

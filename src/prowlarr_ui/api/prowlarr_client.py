@@ -28,10 +28,16 @@ class ProwlarrClient:
         self.api_key = api_key
         self.timeout = timeout
         self.retries = retries
-        self.auth = (http_basic_auth_username, http_basic_auth_password) if http_basic_auth_username else None
+        self.auth = (
+            (http_basic_auth_username, http_basic_auth_password)
+            if http_basic_auth_username
+            else None
+        )
 
     @staticmethod
-    def _sleep_with_cancel(seconds: float, should_cancel: Callable[[], bool] | None) -> bool:
+    def _sleep_with_cancel(
+        seconds: float, should_cancel: Callable[[], bool] | None
+    ) -> bool:
         """Sleep in small increments so retries can be cancelled cooperatively."""
         deadline = time.monotonic() + max(0.0, float(seconds))
         while True:
@@ -88,11 +94,21 @@ class ProwlarrClient:
             try:
                 if method == "GET":
                     response = http.get(
-                        url, headers=headers, params=params or {}, timeout=timeout_value, auth=self.auth
+                        url,
+                        headers=headers,
+                        params=params or {},
+                        timeout=timeout_value,
+                        auth=self.auth,
                     )
                 elif method == "POST":
                     headers["Content-Type"] = "application/json"
-                    response = http.post(url, headers=headers, json=data or {}, timeout=timeout_value, auth=self.auth)
+                    response = http.post(
+                        url,
+                        headers=headers,
+                        json=data or {},
+                        timeout=timeout_value,
+                        auth=self.auth,
+                    )
                 else:
                     raise ValueError(f"Unsupported method: {method}")
 
@@ -129,7 +145,9 @@ class ProwlarrClient:
                 last_error = e
                 if attempt < max_attempts:
                     wait = 2**attempt
-                    logger.warning(f"Connection error: {e}, retrying in {wait}s (attempt {attempt}/{max_attempts})")
+                    logger.warning(
+                        f"Connection error: {e}, retrying in {wait}s (attempt {attempt}/{max_attempts})"
+                    )
                     if self._sleep_with_cancel(wait, should_cancel):
                         raise RuntimeError("Prowlarr request cancelled") from None
                 else:
@@ -139,7 +157,9 @@ class ProwlarrClient:
             raise last_error
         raise RuntimeError("Prowlarr request failed without captured error")
 
-    def get_indexers(self, should_cancel: Callable[[], bool] | None = None) -> list[dict]:
+    def get_indexers(
+        self, should_cancel: Callable[[], bool] | None = None
+    ) -> list[dict]:
         """Fetch all configured indexers"""
         try:
             return self._api_request("indexer", should_cancel=should_cancel)
@@ -177,7 +197,12 @@ class ProwlarrClient:
         Returns list of release dictionaries
         """
         try:
-            params = {"type": "search", "query": query, "offset": offset, "limit": limit}
+            params = {
+                "type": "search",
+                "query": query,
+                "offset": offset,
+                "limit": limit,
+            }
 
             # Include explicit list when provided. None means "all".
             if indexer_ids is not None:
@@ -192,7 +217,12 @@ class ProwlarrClient:
             logger.error(f"Search failed: {e}")
             raise
 
-    def download(self, guid: str, indexer_id: int, should_cancel: Callable[[], bool] | None = None) -> bool:
+    def download(
+        self,
+        guid: str,
+        indexer_id: int,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> bool:
         """
         Download/grab a release
         Uses POST /api/v1/search with ReleaseResource body
@@ -202,7 +232,9 @@ class ProwlarrClient:
                 logger.info("Download request cancelled before API call")
                 return False
             data = {"guid": guid, "indexerId": indexer_id}
-            self._api_request("search", method="POST", data=data, should_cancel=should_cancel)
+            self._api_request(
+                "search", method="POST", data=data, should_cancel=should_cancel
+            )
             logger.info("Download successful via direct API")
             return True
         except RuntimeError as e:

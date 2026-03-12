@@ -83,8 +83,12 @@ def test_prowlarr_api(config):
         client = ProwlarrClient(
             host,
             api_key,
-            http_basic_auth_username=prowlarr_config.get("http_basic_auth_username", ""),
-            http_basic_auth_password=prowlarr_config.get("http_basic_auth_password", ""),
+            http_basic_auth_username=prowlarr_config.get(
+                "http_basic_auth_username", ""
+            ),
+            http_basic_auth_password=prowlarr_config.get(
+                "http_basic_auth_password", ""
+            ),
         )
         print_test("Client Creation", True, f"Host: {host}")
     except Exception as e:
@@ -118,7 +122,9 @@ def test_prowlarr_api(config):
     try:
         test_query = "test"
         results = client.search(test_query, offset=0, limit=5)
-        print_test("Search Test", True, f"Query '{test_query}' returned {len(results)} results")
+        print_test(
+            "Search Test", True, f"Query '{test_query}' returned {len(results)} results"
+        )
 
         # Show first 2 results
         for result in results[:2]:
@@ -140,7 +146,9 @@ def test_everything_sdk():
         everything = EverythingSearch(integration_method="sdk")
 
         if not everything.sdk_available:
-            print_test("SDK Available", False, "Everything64.dll not found or failed to load")
+            print_test(
+                "SDK Available", False, "Everything64.dll not found or failed to load"
+            )
             return False
 
         print_test("SDK Available", True, "Everything64.dll loaded successfully")
@@ -152,7 +160,9 @@ def test_everything_sdk():
     try:
         test_query = "*.txt"
         results = everything.search(test_query, everything_max_results=5)
-        print_test("Search Test", True, f"Query '{test_query}' returned {len(results)} results")
+        print_test(
+            "Search Test", True, f"Query '{test_query}' returned {len(results)} results"
+        )
 
         # Show first 3 results
         for filename, size in results[:3]:
@@ -174,8 +184,16 @@ def test_everything_http():
         everything = EverythingSearch(integration_method="http")
 
         if not everything.http_available:
-            print_test("HTTP Server Available", False, "Everything HTTP server not responding at http://localhost:80")
-            print_test("", False, "Enable HTTP server in Everything: Tools > Options > HTTP Server")
+            print_test(
+                "HTTP Server Available",
+                False,
+                "Everything HTTP server not responding at http://localhost:80",
+            )
+            print_test(
+                "",
+                False,
+                "Enable HTTP server in Everything: Tools > Options > HTTP Server",
+            )
             return False
 
         print_test("HTTP Server Available", True, "Connected to http://localhost:80")
@@ -187,7 +205,9 @@ def test_everything_http():
     try:
         test_query = "*.txt"
         results = everything.search(test_query, everything_max_results=5)
-        print_test("Search Test", True, f"Query '{test_query}' returned {len(results)} results")
+        print_test(
+            "Search Test", True, f"Query '{test_query}' returned {len(results)} results"
+        )
 
         # Show first 3 results
         for filename, size in results[:3]:
@@ -218,7 +238,9 @@ def main():
         print_test("Load runtime config", True, "Configuration loaded successfully")
     except Exception as e:
         print_test("Load runtime config", False, str(e))
-        print(f"\n{Colors.RED}Cannot proceed without valid runtime config{Colors.RESET}")
+        print(
+            f"\n{Colors.RED}Cannot proceed without valid runtime config{Colors.RESET}"
+        )
         return 1
 
     # Run all tests

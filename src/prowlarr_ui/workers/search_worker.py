@@ -71,7 +71,9 @@ class SearchWorker(QThread):
                 return
 
             elapsed = time.time() - start_time
-            logger.info(f"Search completed in {elapsed:.2f}s, found {len(results)} results")
+            logger.info(
+                f"Search completed in {elapsed:.2f}s, found {len(results)} results"
+            )
 
             try:
                 self.search_done.emit(results, elapsed)

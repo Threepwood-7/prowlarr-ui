@@ -46,7 +46,9 @@ class EverythingCheckWorker(QThread):
             for row, result in enumerate(self.results):
                 if self.isInterruptionRequested():
                     interrupted = True
-                    logger.info("EverythingCheckWorker interruption requested, stopping early")
+                    logger.info(
+                        "EverythingCheckWorker interruption requested, stopping early"
+                    )
                     break
 
                 title = result.get("title", "Unknown")
@@ -55,7 +57,9 @@ class EverythingCheckWorker(QThread):
                 # Quote the prefix to prevent Everything interpreting |, !, <, >, () as operators
                 prefix = title[: self.everything_search_chars].replace('"', "")
                 search_query = f'"{prefix}"*'
-                everything_results = self.everything.search(search_query, everything_max_results=100)
+                everything_results = self.everything.search(
+                    search_query, everything_max_results=100
+                )
 
                 if self.isInterruptionRequested():
                     interrupted = True

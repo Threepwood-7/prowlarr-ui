@@ -21,7 +21,9 @@ def _settings_file(config_dir: Path) -> Path:
     return Path(settings.fileName())
 
 
-def test_ensure_config_exists_seeds_config_namespace(monkeypatch, tmp_path: Path) -> None:
+def test_ensure_config_exists_seeds_config_namespace(
+    monkeypatch, tmp_path: Path
+) -> None:
     config_dir = tmp_path / "cfg"
     monkeypatch.setenv("CONFIG_DIR", str(config_dir))
     path = _settings_file(config_dir)

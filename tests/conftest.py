@@ -40,7 +40,9 @@ def mocked_main():
 
 
 @pytest.fixture
-def window(qtbot: object, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> appmod.MainWindow:
+def window(
+    qtbot: object, monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> appmod.MainWindow:
     monkeypatch.setenv("CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(appmod, "InitWorker", _InitWorkerStub)
@@ -52,7 +54,9 @@ def window(qtbot: object, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> 
             {"id": 2, "name": "Indexer Two", "enable": True},
         ]
     )
-    widget.populate_categories(widget.prowlarr.get_categories() if widget.prowlarr else [])
+    widget.populate_categories(
+        widget.prowlarr.get_categories() if widget.prowlarr else []
+    )
     widget.everything = object()
     widget.status_label.setText("Ready - 2 indexers loaded")
     yield widget

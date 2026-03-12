@@ -43,7 +43,12 @@ class LogWindow(QWidget):
         screen = QApplication.primaryScreen().availableGeometry()
         margin = 160
         h = screen.height() - 2 * margin
-        self.setGeometry(screen.x() + screen.width() // 2, screen.y() + margin, screen.width() // 2, h)
+        self.setGeometry(
+            screen.x() + screen.width() // 2,
+            screen.y() + margin,
+            screen.width() // 2,
+            h,
+        )
 
         layout = QVBoxLayout()
         self.setLayout(layout)

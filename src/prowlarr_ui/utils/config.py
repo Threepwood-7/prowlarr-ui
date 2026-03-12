@@ -24,7 +24,7 @@ from threep_commons.config_helpers import (
 )
 from threep_commons.settings import QSettingsValueStore, ensure_schema_defaults
 
-from prowlarr_ui.constants import APP_IDENTITY, SETTINGS_APP_NAME, SETTINGS_ORG_NAME
+from prowlarr_ui.constants import APP_IDENTITY, SETTINGS_APP_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,11 @@ CONFIG_SCHEMA: tuple[tuple[str, type, Any], ...] = (
         str,
         DEFAULT_CONFIG["prowlarr"]["http_basic_auth_password"],
     ),
-    ("config/settings/title_match_chars", int, DEFAULT_CONFIG["settings"]["title_match_chars"]),
+    (
+        "config/settings/title_match_chars",
+        int,
+        DEFAULT_CONFIG["settings"]["title_match_chars"],
+    ),
     (
         "config/settings/everything_search_chars",
         int,
@@ -89,7 +93,11 @@ CONFIG_SCHEMA: tuple[tuple[str, type, Any], ...] = (
         int,
         DEFAULT_CONFIG["settings"]["everything_recheck_delay"],
     ),
-    ("config/settings/web_search_url", str, DEFAULT_CONFIG["settings"]["web_search_url"]),
+    (
+        "config/settings/web_search_url",
+        str,
+        DEFAULT_CONFIG["settings"]["web_search_url"],
+    ),
     (
         "config/settings/everything_integration_method",
         str,
@@ -166,7 +174,9 @@ def config_store_file_path() -> str:
     return _new_config_store().file_name()
 
 
-def _set_nested_value(target: dict[str, Any], key_path: tuple[str, ...], value: Any) -> None:
+def _set_nested_value(
+    target: dict[str, Any], key_path: tuple[str, ...], value: Any
+) -> None:
     _shared_set_nested_value(target, key_path, value)
 
 
@@ -209,14 +219,18 @@ def load_config() -> dict[str, Any]:
     merged = get_default_config()
     for key, expected_type, default in CONFIG_SCHEMA:
         raw = settings.value(key, default)
-        _set_nested_value(merged, _schema_config_path(key), _coerce_value(raw, expected_type, default))
+        _set_nested_value(
+            merged, _schema_config_path(key), _coerce_value(raw, expected_type, default)
+        )
     _apply_secret_env_overrides(merged)
     return merged
 
 
 def save_config(config: dict[str, Any]) -> None:
     """Persist known config keys to the settings store and sync immediately."""
-    merged = _deep_merge_dicts(get_default_config(), config if isinstance(config, dict) else {})
+    merged = _deep_merge_dicts(
+        get_default_config(), config if isinstance(config, dict) else {}
+    )
     settings = _new_config_store()
 
     for key, expected_type, default in CONFIG_SCHEMA:
@@ -237,7 +251,9 @@ def get_missing_required_config(config: dict[str, Any]) -> list[str]:
     missing: list[str] = []
     prowlarr = config.get("prowlarr", {}) if isinstance(config, dict) else {}
     host = str(prowlarr.get("host", "") if isinstance(prowlarr, dict) else "").strip()
-    api_key = str(prowlarr.get("api_key", "") if isinstance(prowlarr, dict) else "").strip()
+    api_key = str(
+        prowlarr.get("api_key", "") if isinstance(prowlarr, dict) else ""
+    ).strip()
     if not host:
         missing.append("prowlarr.host is required")
     if not api_key or api_key == "YOUR_API_KEY_HERE":
@@ -255,8 +271,12 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         warnings.append("Prowlarr API key is not set")
 
     host = prowlarr.get("host", "") if isinstance(prowlarr, dict) else ""
-    if host and not (str(host).startswith("http://") or str(host).startswith("https://")):
-        warnings.append(f"Prowlarr host should start with http:// or https:// (got: {host})")
+    if host and not (
+        str(host).startswith("http://") or str(host).startswith("https://")
+    ):
+        warnings.append(
+            f"Prowlarr host should start with http:// or https:// (got: {host})"
+        )
 
     settings = config.get("settings", {})
     if not isinstance(settings, dict):
@@ -267,17 +287,41 @@ def validate_config(config: dict[str, Any]) -> list[str]:
 
     clamp_rules = {
         "title_match_chars": (1, 200, defaults.get("title_match_chars", 42)),
-        "everything_search_chars": (1, 200, defaults.get("everything_search_chars", 42)),
+        "everything_search_chars": (
+            1,
+            200,
+            defaults.get("everything_search_chars", 42),
+        ),
         "prowlarr_page_size": (1, 10000, defaults.get("prowlarr_page_size", 100)),
         "everything_max_results": (1, 100, defaults.get("everything_max_results", 5)),
         "api_timeout": (1, 300, defaults.get("api_timeout", 300)),
         "api_retries": (0, 10, defaults.get("api_retries", 2)),
-        "everything_recheck_delay": (0, 60000, defaults.get("everything_recheck_delay", 6000)),
+        "everything_recheck_delay": (
+            0,
+            60000,
+            defaults.get("everything_recheck_delay", 6000),
+        ),
         "everything_batch_size": (1, 1000, defaults.get("everything_batch_size", 10)),
-        "download_queue_stale_grace_seconds": (0.1, 300.0, defaults.get("download_queue_stale_grace_seconds", 20.0)),
-        "shutdown_force_after_seconds": (1.0, 300.0, defaults.get("shutdown_force_after_seconds", 15.0)),
-        "shutdown_force_arm_seconds": (1.0, 60.0, defaults.get("shutdown_force_arm_seconds", 8.0)),
-        "everything_check_stale_grace_seconds": (0.1, 300.0, defaults.get("everything_check_stale_grace_seconds", 20.0)),
+        "download_queue_stale_grace_seconds": (
+            0.1,
+            300.0,
+            defaults.get("download_queue_stale_grace_seconds", 20.0),
+        ),
+        "shutdown_force_after_seconds": (
+            1.0,
+            300.0,
+            defaults.get("shutdown_force_after_seconds", 15.0),
+        ),
+        "shutdown_force_arm_seconds": (
+            1.0,
+            60.0,
+            defaults.get("shutdown_force_arm_seconds", 8.0),
+        ),
+        "everything_check_stale_grace_seconds": (
+            0.1,
+            300.0,
+            defaults.get("everything_check_stale_grace_seconds", 20.0),
+        ),
     }
 
     for key, (min_val, max_val, default_val) in clamp_rules.items():
@@ -285,7 +329,9 @@ def validate_config(config: dict[str, Any]) -> list[str]:
             continue
         val = settings[key]
         if not isinstance(val, (int, float)):
-            warnings.append(f"settings.{key} must be numeric, using default ({default_val})")
+            warnings.append(
+                f"settings.{key} must be numeric, using default ({default_val})"
+            )
             settings[key] = default_val
             continue
         if val < min_val or val > max_val:
@@ -296,7 +342,10 @@ def validate_config(config: dict[str, Any]) -> list[str]:
             settings[key] = clamped
 
     valid_everything_methods = ("sdk", "http", "none")
-    if settings.get("everything_integration_method", "sdk") not in valid_everything_methods:
+    if (
+        settings.get("everything_integration_method", "sdk")
+        not in valid_everything_methods
+    ):
         warnings.append("Invalid everything_integration_method, using 'sdk'")
         settings["everything_integration_method"] = "sdk"
 

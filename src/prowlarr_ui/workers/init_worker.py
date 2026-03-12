@@ -15,7 +15,9 @@ class InitWorker(QThread):
 
     init_done = Signal(object, list, str)  # (everything_instance, indexers, error)
 
-    def __init__(self, everything_method: str, prowlarr: Any, everything_sdk_url: str = "") -> None:
+    def __init__(
+        self, everything_method: str, prowlarr: Any, everything_sdk_url: str = ""
+    ) -> None:
         super().__init__()
         self.everything_method = everything_method
         self.prowlarr = prowlarr
@@ -40,7 +42,9 @@ class InitWorker(QThread):
             return
         try:
             if self.prowlarr:
-                indexers = self.prowlarr.get_indexers(should_cancel=self.isInterruptionRequested)
+                indexers = self.prowlarr.get_indexers(
+                    should_cancel=self.isInterruptionRequested
+                )
         except Exception as exc:
             error = f"Failed to load indexers: {exc}"
             logger.error(error)

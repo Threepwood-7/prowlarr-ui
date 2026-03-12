@@ -68,7 +68,9 @@ class DownloadWorker(QThread):
     def is_accepting_items(self) -> bool:
         """Whether this worker can still accept new queue items."""
         with self._lock:
-            return bool(self._accepting_new_items and not self.isInterruptionRequested())
+            return bool(
+                self._accepting_new_items and not self.isInterruptionRequested()
+            )
 
     def run(self):
         """Process download queue sequentially, picking up newly added items"""
@@ -102,7 +104,9 @@ class DownloadWorker(QThread):
             logger.info(f"Downloading {idx + 1}/{total}: {title}")
 
             try:
-                success = self.client.download(guid, indexer_id, should_cancel=self.isInterruptionRequested)
+                success = self.client.download(
+                    guid, indexer_id, should_cancel=self.isInterruptionRequested
+                )
                 try:
                     # Emit composite identity to disambiguate duplicate GUIDs across indexers.
                     self.item_downloaded.emit(guid, int(indexer_id), success)
@@ -117,7 +121,9 @@ class DownloadWorker(QThread):
                 try:
                     self.item_downloaded.emit(guid, int(indexer_id), False)
                 except Exception as emit_error:
-                    logger.error(f"Failed to emit error item_downloaded signal: {emit_error}")
+                    logger.error(
+                        f"Failed to emit error item_downloaded signal: {emit_error}"
+                    )
 
             idx += 1
 
