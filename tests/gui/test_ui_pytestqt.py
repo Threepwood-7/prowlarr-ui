@@ -187,15 +187,18 @@ def test_fit_columns_resizes_visible_columns_and_persists_widths(window):
     after = window.results_table.columnWidth(window.COL_INDEXER)
     assert after >= before
     assert "fitted visible columns" in window.status_label.text().lower()
-    saved = window._get_pref_int_list("column_widths", []) or []
+    saved = window.preferences_store.get_int_list(window._pref_key("column_widths"), []) or []
     assert len(saved) == window.COL_COUNT - 1
 
 
 def test_edit_ini_file_opens_preferences_path(window, monkeypatch):
     opened = {}
-    monkeypatch.setattr(window, "_open_file_with_default_app", lambda path: opened.__setitem__("path", path))
+    monkeypatch.setattr(
+        "prowlarr_ui.app.open_path_in_default_app",
+        lambda path: opened.__setitem__("path", path) or True,
+    )
 
-    ini_path = window.preferences_store.fileName()
+    ini_path = window.preferences_store.file_name()
 
     window._edit_preferences_ini_file()
 

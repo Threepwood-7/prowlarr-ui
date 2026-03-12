@@ -19,7 +19,6 @@ from urllib.parse import quote
 from PySide6.QtCore import (
     QItemSelection,
     QItemSelectionModel,
-    QSettings,
     Qt,
     QTimer,
 )
@@ -68,10 +67,11 @@ from threep_commons.logging import resolve_log_path, setup_logging_from_identity
 from threep_commons.paths import configure_qsettings
 from threep_commons.qt.slots import safe_slot
 from threep_commons.quality import parse_quality
+from threep_commons.settings import QSettingsValueStore
 
 from prowlarr_ui.api.everything_search import EverythingSearch
 from prowlarr_ui.api.prowlarr_client import ProwlarrClient
-from prowlarr_ui.constants import APP_IDENTITY, SETTINGS_APP_NAME, SETTINGS_ORG_NAME
+from prowlarr_ui.constants import APP_IDENTITY, SETTINGS_APP_NAME
 from prowlarr_ui.ui.help_text import HELP_HTML
 from prowlarr_ui.ui.log_window import LogWindow
 from prowlarr_ui.ui.setup_wizard import run_setup_wizard
@@ -176,13 +176,14 @@ class MainWindow(QMainWindow):
         self.everything = None
 
         # UI/runtime preferences share the same canonical config store.
-        self.preferences_store = QSettings(
-            QSettings.IniFormat,
-            QSettings.UserScope,
-            SETTINGS_ORG_NAME,
-            SETTINGS_APP_NAME,
+        self.preferences_store = QSettingsValueStore.from_identity(
+            APP_IDENTITY,
+            app_name=SETTINGS_APP_NAME,
         )
-        self.search_history = self._get_pref_str_list("search_history", [])
+        self.search_history = self.preferences_store.get_str_list(
+            self._pref_key("search_history"),
+            [],
+        )
 
         # Current search state
         self.current_worker = None
@@ -267,62 +268,6 @@ class MainWindow(QMainWindow):
         namespace = "prefs" if name in PREFS_NAMESPACE_KEYS else "ui"
         return f"{namespace}/{name}"
 
-    @staticmethod
-    def _to_list(value: Any, default: list[Any] | None = None) -> list[Any]:
-        if value is None:
-            return list(default or [])
-        if isinstance(value, list):
-            return list(value)
-        if isinstance(value, tuple):
-            return list(value)
-        if isinstance(value, str):
-            if value == "":
-                return []
-            return [value]
-        return [value]
-
-    def _get_pref_str_list(self, key: str, default: list[str] | None = None) -> list[str]:
-        full_key = self._pref_key(key)
-        if default is None and not self.preferences_store.contains(full_key):
-            return []
-        raw = self.preferences_store.value(full_key, default if default is not None else [])
-        return [str(v) for v in self._to_list(raw, default)]
-
-    def _get_pref_int_list(self, key: str, default: list[int] | None = None) -> list[int] | None:
-        full_key = self._pref_key(key)
-        if default is None and not self.preferences_store.contains(full_key):
-            return None
-        raw = self.preferences_store.value(full_key, default if default is not None else [])
-        values = []
-        for item in self._to_list(raw, default):
-            try:
-                values.append(int(item))
-            except Exception:
-                continue
-        return values
-
-    def _get_pref_bool(self, key: str, default: bool = False) -> bool:
-        full_key = self._pref_key(key)
-        if not self.preferences_store.contains(full_key):
-            return bool(default)
-        raw = self.preferences_store.value(full_key, default)
-        if isinstance(raw, bool):
-            return raw
-        if isinstance(raw, (int, float)):
-            return bool(raw)
-        if isinstance(raw, str):
-            return raw.strip().lower() in {"1", "true", "yes", "on"}
-        return bool(default)
-
-    def _set_pref(self, key: str, value: Any, schedule_sync: bool = True):
-        self.preferences_store.setValue(self._pref_key(key), value)
-        if schedule_sync:
-            self._schedule_preferences_sync()
-
-    def _remove_pref(self, key: str):
-        self.preferences_store.remove(self._pref_key(key))
-        self._schedule_preferences_sync()
-
     def _schedule_preferences_sync(self, delay_ms: int = 300):
         """Debounce INI sync to avoid frequent disk writes."""
         self._prefs_dirty = True
@@ -339,16 +284,31 @@ class MainWindow(QMainWindow):
 
     def _persist_runtime_preferences(self):
         """Persist current runtime preference state to INI."""
-        self._set_pref("search_history", list(self.search_history), schedule_sync=False)
+        self.preferences_store.set_value(
+            self._pref_key("search_history"),
+            list(self.search_history),
+        )
         # Avoid wiping saved selection when close occurs before async init populates trees.
         if self._indexers_loaded:
-            self._set_pref("selected_indexers", self._get_checked_indexer_ids(), schedule_sync=False)
+            self.preferences_store.set_value(
+                self._pref_key("selected_indexers"),
+                self._get_checked_indexer_ids(),
+            )
         if self._categories_loaded:
-            self._set_pref("selected_categories", self._get_checked_category_ids(), schedule_sync=False)
-        self._set_pref("splitter_sizes", [int(s) for s in self.splitter.sizes()], schedule_sync=False)
-        self._set_pref("hide_existing", bool(self.hide_existing_checkbox.isChecked()), schedule_sync=False)
+            self.preferences_store.set_value(
+                self._pref_key("selected_categories"),
+                self._get_checked_category_ids(),
+            )
+        self.preferences_store.set_value(
+            self._pref_key("splitter_sizes"),
+            [int(s) for s in self.splitter.sizes()],
+        )
+        self.preferences_store.set_value(
+            self._pref_key("hide_existing"),
+            bool(self.hide_existing_checkbox.isChecked()),
+        )
         hidden_cols = [self.COL_HEADERS[col] for col in range(self.COL_COUNT) if self.results_table.isColumnHidden(col)]
-        self._set_pref("hidden_columns", hidden_cols, schedule_sync=False)
+        self.preferences_store.set_value(self._pref_key("hidden_columns"), hidden_cols)
         self._save_column_widths()
         self._prefs_dirty = True
 
@@ -362,13 +322,18 @@ class MainWindow(QMainWindow):
     def save_splitter_sizes(self):
         """Save splitter sizes to INI preferences"""
         sizes = self.splitter.sizes()
-        self._set_pref("splitter_sizes", [int(s) for s in sizes])
+        self.preferences_store.set_value(
+            self._pref_key("splitter_sizes"),
+            [int(s) for s in sizes],
+        )
+        self._schedule_preferences_sync()
         logger.info(f"Splitter sizes saved: {sizes}")
 
     @safe_slot
     def on_hide_existing_toggled(self, checked: bool):
         """Handle Hide existing checkbox toggle - save preference and apply filter"""
-        self._set_pref("hide_existing", bool(checked))
+        self.preferences_store.set_value(self._pref_key("hide_existing"), bool(checked))
+        self._schedule_preferences_sync()
         self.apply_hide_existing_filter()
 
     def apply_hide_existing_filter(self):
@@ -474,7 +439,10 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(center_panel)
 
         # Load saved splitter sizes or use defaults.
-        saved_sizes = self._get_pref_int_list("splitter_sizes", [300, 1100]) or [300, 1100]
+        saved_sizes = self.preferences_store.get_int_list(
+            self._pref_key("splitter_sizes"),
+            [300, 1100],
+        ) or [300, 1100]
         self.splitter.setSizes(saved_sizes)
 
         # Connect to save splitter position when moved
@@ -626,7 +594,10 @@ class MainWindow(QMainWindow):
 
         # Hide existing checkbox
         self.hide_existing_checkbox = QCheckBox("Hide &existing")
-        saved_hide = self._get_pref_bool("hide_existing", False)
+        saved_hide = self.preferences_store.get_bool(
+            self._pref_key("hide_existing"),
+            False,
+        )
         self.hide_existing_checkbox.setChecked(saved_hide)
         self.hide_existing_checkbox.toggled.connect(self.on_hide_existing_toggled)
         self.hide_existing_checkbox.setToolTip("Hide results that already exist on disk (detected via Everything)")
@@ -727,7 +698,10 @@ class MainWindow(QMainWindow):
         header.customContextMenuRequested.connect(self._show_header_context_menu)
 
         # Restore hidden columns from preferences
-        hidden_cols = self._get_pref_str_list("hidden_columns", [])
+        hidden_cols = self.preferences_store.get_str_list(
+            self._pref_key("hidden_columns"),
+            [],
+        )
         for col_name in hidden_cols:
             if col_name in self.COL_HEADERS:
                 col_idx = self.COL_HEADERS.index(col_name)
@@ -865,7 +839,9 @@ class MainWindow(QMainWindow):
         # Tools menu
         tools_menu = menubar.addMenu("&Tools")
         edit_ini_action = QAction("Edit &.ini File", self)
-        edit_ini_action.setStatusTip(f"Open preferences INI file: {self.preferences_store.fileName()}")
+        edit_ini_action.setStatusTip(
+            f"Open preferences INI file: {self.preferences_store.file_name()}"
+        )
         edit_ini_action.triggered.connect(self._edit_preferences_ini_file)
         tools_menu.addAction(edit_ini_action)
 
@@ -889,7 +865,10 @@ class MainWindow(QMainWindow):
         self.bookmarks_separator = self.bookmarks_menu.addSeparator()
 
         # Load saved bookmarks into menu
-        self._bookmarks = self._get_pref_str_list("bookmarks", [])
+        self._bookmarks = self.preferences_store.get_str_list(
+            self._pref_key("bookmarks"),
+            [],
+        )
         for bm in self._bookmarks:
             self._add_bookmark_action(bm)
 
@@ -956,7 +935,10 @@ class MainWindow(QMainWindow):
         self.indexers_model.appendRow(root)
 
         # Load saved indexer selection from INI (None = no saved preference).
-        saved_indexers = self._get_pref_int_list("selected_indexers", None)
+        saved_indexers = self.preferences_store.get_int_list(
+            self._pref_key("selected_indexers"),
+            None,
+        )
 
         # Add each enabled indexer as child
         for indexer in indexers:
@@ -1007,7 +989,10 @@ class MainWindow(QMainWindow):
         self.categories_model.appendRow(root)
 
         # Load saved category selection from INI (None = no saved preference).
-        saved_categories = self._get_pref_int_list("selected_categories", None)
+        saved_categories = self.preferences_store.get_int_list(
+            self._pref_key("selected_categories"),
+            None,
+        )
 
         # Add each category with code in brackets
         for category in categories:
@@ -1266,7 +1251,11 @@ class MainWindow(QMainWindow):
 
     def _save_bookmarks(self):
         """Persist bookmarks to INI preferences."""
-        self._set_pref("bookmarks", list(self._bookmarks))
+        self.preferences_store.set_value(
+            self._pref_key("bookmarks"),
+            list(self._bookmarks),
+        )
+        self._schedule_preferences_sync()
 
     @safe_slot
     def _on_search_return_pressed(self):
@@ -2340,7 +2329,8 @@ class MainWindow(QMainWindow):
         try:
             self.results_table.setColumnHidden(col, hidden)
             hidden_cols = [self.COL_HEADERS[c] for c in range(self.COL_COUNT) if self.results_table.isColumnHidden(c)]
-            self._set_pref("hidden_columns", hidden_cols)
+            self.preferences_store.set_value(self._pref_key("hidden_columns"), hidden_cols)
+            self._schedule_preferences_sync()
         except Exception as e:
             logger.error(f"Failed to toggle column visibility: {e}")
 
@@ -2351,11 +2341,14 @@ class MainWindow(QMainWindow):
             if col == self.COL_TITLE:
                 continue  # Title column stretches, skip
             widths.append(self.results_table.columnWidth(col))
-        self._set_pref("column_widths", widths, schedule_sync=False)
+        self.preferences_store.set_value(self._pref_key("column_widths"), widths)
 
     def _restore_column_widths(self):
         """Restore column widths from saved INI preferences."""
-        widths = self._get_pref_int_list("column_widths", []) or []
+        widths = self.preferences_store.get_int_list(
+            self._pref_key("column_widths"),
+            [],
+        ) or []
         if not widths:
             return
         idx = 0
@@ -2390,8 +2383,9 @@ class MainWindow(QMainWindow):
         # Re-set Title to stretch mode
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_TITLE, QHeaderView.Stretch)
         # Clear saved widths and hidden columns
-        self._remove_pref("column_widths")
-        self._remove_pref("hidden_columns")
+        self.preferences_store.remove(self._pref_key("column_widths"))
+        self.preferences_store.remove(self._pref_key("hidden_columns"))
+        self._schedule_preferences_sync()
         self.status_label.setText("View reset: all columns visible, default widths")
 
     def display_results(self, results: list[dict]):
@@ -2890,12 +2884,8 @@ class MainWindow(QMainWindow):
             self.status_label.setText("No download history yet")
             return
 
-        self._open_file_with_default_app(history_path)
-
-    def _open_file_with_default_app(self, file_path: str):
-        """Open a file using the OS default application."""
         try:
-            if not open_path_in_default_app(file_path):
+            if not open_path_in_default_app(history_path):
                 raise RuntimeError("No default opener available")
         except Exception as e:
             logger.error(f"Failed to open file: {e}")
@@ -2904,7 +2894,7 @@ class MainWindow(QMainWindow):
     @safe_slot
     def _edit_preferences_ini_file(self):
         """Open the user preferences INI file in the system editor."""
-        ini_path = self.preferences_store.fileName()
+        ini_path = self.preferences_store.file_name()
         try:
             # Ensure file exists on disk before opening.
             self.preferences_store.sync()
@@ -2914,7 +2904,8 @@ class MainWindow(QMainWindow):
             if not os.path.exists(ini_path):
                 with open(ini_path, "a", encoding="utf-8"):
                     pass
-            self._open_file_with_default_app(ini_path)
+            if not open_path_in_default_app(ini_path):
+                raise RuntimeError("No default opener available")
         except Exception as e:
             logger.error(f"Failed to open preferences INI file: {e}")
             self.status_label.setText(f"Cannot open INI file: {e}")

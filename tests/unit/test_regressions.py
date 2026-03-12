@@ -9,7 +9,7 @@ from prowlarr_ui.workers.search_worker import SearchWorker
 
 
 def test_indexer_restore_empty_selection_keeps_root_consistent(window):
-    window._set_pref("selected_indexers", [], schedule_sync=False)
+    window.preferences_store.set_value(window._pref_key("selected_indexers"), [])
     window.populate_indexers(
         [
             {"id": 1, "name": "Indexer One", "enable": True},
@@ -24,7 +24,7 @@ def test_indexer_restore_empty_selection_keeps_root_consistent(window):
 
 
 def test_indexer_restore_all_selection_returns_none(window):
-    window._set_pref("selected_indexers", [1, 2], schedule_sync=False)
+    window.preferences_store.set_value(window._pref_key("selected_indexers"), [1, 2])
     window.populate_indexers(
         [
             {"id": 1, "name": "Indexer One", "enable": True},
@@ -51,15 +51,21 @@ def test_start_search_blocks_when_no_indexers_selected(window):
 
 
 def test_persist_runtime_preferences_skips_unloaded_tree_overwrite(window):
-    window._set_pref("selected_indexers", [101, 202], schedule_sync=False)
-    window._set_pref("selected_categories", [3030], schedule_sync=False)
+    window.preferences_store.set_value(window._pref_key("selected_indexers"), [101, 202])
+    window.preferences_store.set_value(window._pref_key("selected_categories"), [3030])
 
     window._indexers_loaded = False
     window._categories_loaded = False
     window._persist_runtime_preferences()
 
-    assert window._get_pref_int_list("selected_indexers", None) == [101, 202]
-    assert window._get_pref_int_list("selected_categories", None) == [3030]
+    assert (
+        window.preferences_store.get_int_list(window._pref_key("selected_indexers"), None)
+        == [101, 202]
+    )
+    assert (
+        window.preferences_store.get_int_list(window._pref_key("selected_categories"), None)
+        == [3030]
+    )
 
 
 def test_video_paths_are_keyed_by_release_identity_not_title(window):
