@@ -29,8 +29,6 @@ from prowlarr_ui.constants import APP_IDENTITY, SETTINGS_APP_NAME, SETTINGS_ORG_
 logger = logging.getLogger(__name__)
 
 APP_SLUG = "prowlarr_ui"
-CONFIG_SETTINGS_ORG_NAME = SETTINGS_ORG_NAME
-CONFIG_SETTINGS_APP_NAME = SETTINGS_APP_NAME
 
 SECRET_ENV_TO_KEYS = (
     ("PROWLARR_UI_API_KEY", ("prowlarr", "api_key")),
@@ -160,7 +158,7 @@ CONFIG_SCHEMA: tuple[tuple[str, type, Any], ...] = (
 def _new_config_store() -> QSettingsValueStore:
     return QSettingsValueStore.from_identity(
         APP_IDENTITY,
-        app_name=CONFIG_SETTINGS_APP_NAME,
+        app_name=SETTINGS_APP_NAME,
     )
 
 
