@@ -114,6 +114,7 @@ select = [
   "TCH",
   "RUF",
 ]
+external = ["C901"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
