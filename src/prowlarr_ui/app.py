@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1400, 800)
         self.setWindowIcon(self._create_globe_icon())
 
-        # Load and validate runtime configuration from QSettings.
+        # Load and validate runtime configuration from the shared settings store.
         self.config = load_config()
         config_warnings = validate_config(self.config)
         for w in config_warnings:
@@ -3607,7 +3607,7 @@ def main():
     """Application entry point"""
     configure_qsettings(APP_IDENTITY)
 
-    # Ensure config keys exist in QSettings store.
+    # Ensure config keys exist in the shared settings store.
     ensure_config_exists()
 
     # Setup logging

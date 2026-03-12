@@ -34,7 +34,7 @@ class ProwlarrSetupWizardDialog(QDialog):
 
         root = QVBoxLayout(self)
         root.addWidget(
-            QLabel("Configure Prowlarr connection and core settings. Values are saved to QSettings INI.")
+            QLabel("Configure Prowlarr connection and core settings. Values are saved to the shared settings INI.")
         )
 
         form = QFormLayout()

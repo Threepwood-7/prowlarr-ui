@@ -1,4 +1,4 @@
-"""Configuration management utilities backed by QSettings."""
+"""Configuration management utilities backed by the shared settings store."""
 
 from __future__ import annotations
 
@@ -199,12 +199,12 @@ def get_default_config() -> dict[str, Any]:
 
 
 def ensure_config_exists() -> None:
-    """Seed missing keys in QSettings with in-code defaults."""
+    """Seed missing keys in the settings store with in-code defaults."""
     ensure_schema_defaults(_new_config_store(), CONFIG_SCHEMA)
 
 
 def load_config() -> dict[str, Any]:
-    """Load typed configuration from QSettings and apply env overrides."""
+    """Load typed configuration from the settings store and apply env overrides."""
     settings = _new_config_store()
     merged = get_default_config()
     for key, expected_type, default in CONFIG_SCHEMA:
@@ -215,7 +215,7 @@ def load_config() -> dict[str, Any]:
 
 
 def save_config(config: dict[str, Any]) -> None:
-    """Persist known config keys to QSettings and sync immediately."""
+    """Persist known config keys to the settings store and sync immediately."""
     merged = _deep_merge_dicts(get_default_config(), config if isinstance(config, dict) else {})
     settings = _new_config_store()
 
