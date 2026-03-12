@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from threep_commons.files import open_path_in_default_app
+from threep_commons.desktop import open_path_in_default_app
 from threep_commons.logging import resolve_log_path
 
 from prowlarr_ui.constants import APP_IDENTITY

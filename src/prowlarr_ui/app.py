@@ -63,7 +63,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from threep_commons.formatters import format_age, format_size
-from threep_commons.files import open_path_in_default_app
+from threep_commons.desktop import open_path_in_default_app
 from threep_commons.logging import resolve_log_path, setup_logging_from_identity
 from threep_commons.paths import configure_qsettings
 from threep_commons.qt.slots import safe_slot
