@@ -2347,7 +2347,7 @@ class MainWindow(QMainWindow):
         )
 
     @safe_slot
-    def on_sort_changed(self, logical_index: int):
+    def on_sort_changed(self, _logical_index: int):
         """
         Handle sort order change
         Re-apply background colors to avoid similar colors in adjacent rows
@@ -3318,7 +3318,7 @@ class MainWindow(QMainWindow):
         return self._video_paths.get(release_key)
 
     @safe_slot
-    def _on_cell_double_clicked(self, row: int, column: int):
+    def _on_cell_double_clicked(self, row: int, _column: int):
         """Download release on double-click"""
         self.download_release(row)
 

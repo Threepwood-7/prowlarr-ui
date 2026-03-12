@@ -1,4 +1,4 @@
-"""Import-level smoke tests for the package."""
+"""Tests for prowlarr_ui."""
 
 import importlib
 

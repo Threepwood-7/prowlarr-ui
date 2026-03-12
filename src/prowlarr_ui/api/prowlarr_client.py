@@ -48,7 +48,7 @@ class ProwlarrClient:
                 return False
             time.sleep(min(0.1, remaining))
 
-    def _request_timeout(self, cancellable: bool = False):
+    def _request_timeout(self, _cancellable: bool = False):
         """
         Build a requests timeout value (seconds).
         Cancellable worker requests use the same timeout so long-running searches can complete.
