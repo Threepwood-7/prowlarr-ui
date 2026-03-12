@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from threep_commons.config_helpers import (
     coerce_bool as _shared_coerce_bool,
@@ -22,12 +22,9 @@ from threep_commons.config_helpers import (
 from threep_commons.config_helpers import (
     set_nested_value as _shared_set_nested_value,
 )
-from threep_commons.qsettings_store import create_qsettings, qsettings_store_file_path
+from threep_commons.settings import QSettingsValueStore, ensure_schema_defaults
 
 from prowlarr_ui.constants import APP_IDENTITY, SETTINGS_APP_NAME, SETTINGS_ORG_NAME
-
-if TYPE_CHECKING:
-    from PySide6.QtCore import QSettings
 
 logger = logging.getLogger(__name__)
 
@@ -160,18 +157,15 @@ CONFIG_SCHEMA: tuple[tuple[str, type, Any], ...] = (
 )
 
 
-def _new_config_settings() -> QSettings:
-    return create_qsettings(
+def _new_config_store() -> QSettingsValueStore:
+    return QSettingsValueStore.from_identity(
         APP_IDENTITY,
         app_name=CONFIG_SETTINGS_APP_NAME,
     )
 
 
 def config_store_file_path() -> str:
-    return qsettings_store_file_path(
-        APP_IDENTITY,
-        app_name=CONFIG_SETTINGS_APP_NAME,
-    )
+    return _new_config_store().file_name()
 
 
 def _set_nested_value(target: dict[str, Any], key_path: tuple[str, ...], value: Any) -> None:
@@ -208,20 +202,12 @@ def get_default_config() -> dict[str, Any]:
 
 def ensure_config_exists() -> None:
     """Seed missing keys in QSettings with in-code defaults."""
-    settings = _new_config_settings()
-    changed = False
-    for key, expected_type, default in CONFIG_SCHEMA:
-        if settings.contains(key):
-            continue
-        settings.setValue(key, _coerce_value(default, expected_type, default))
-        changed = True
-    if changed:
-        settings.sync()
+    ensure_schema_defaults(_new_config_store(), CONFIG_SCHEMA)
 
 
 def load_config() -> dict[str, Any]:
     """Load typed configuration from QSettings and apply env overrides."""
-    settings = _new_config_settings()
+    settings = _new_config_store()
     merged = get_default_config()
     for key, expected_type, default in CONFIG_SCHEMA:
         raw = settings.value(key, default)
@@ -233,7 +219,7 @@ def load_config() -> dict[str, Any]:
 def save_config(config: dict[str, Any]) -> None:
     """Persist known config keys to QSettings and sync immediately."""
     merged = _deep_merge_dicts(get_default_config(), config if isinstance(config, dict) else {})
-    settings = _new_config_settings()
+    settings = _new_config_store()
 
     for key, expected_type, default in CONFIG_SCHEMA:
         path = _schema_config_path(key)
@@ -243,7 +229,7 @@ def save_config(config: dict[str, Any]) -> None:
                 current = default
                 break
             current = current.get(part, default)
-        settings.setValue(key, _coerce_value(current, expected_type, default))
+        settings.set_value(key, _coerce_value(current, expected_type, default))
 
     settings.sync()
 
