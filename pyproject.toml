@@ -114,12 +114,9 @@ select = [
   "TCH",
   "RUF",
 ]
-external = ["C901"]
-ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*" = ["S101", "S105", "S106"]
-"src/prowlarr_ui/app.py" = ["C901"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["prowlarr_ui"]
@@ -136,6 +133,7 @@ ignore-names = [
   "drawForeground",
   "drawInlineImage",
   "dropEvent",
+  "enterEvent",
   "eventFilter",
   "filePath",
   "filterAcceptsRow",
@@ -148,8 +146,10 @@ ignore-names = [
   "leaveEvent",
   "mouseDoubleClickEvent",
   "mouseMoveEvent",
+  "mousePressEvent",
   "mouseReleaseEvent",
   "moveEvent",
+  "nameFilterDisables",
   "nameFilters",
   "paintEvent",
   "rowCount",
@@ -190,8 +190,6 @@ known_first_party = ["prowlarr_ui", "_common"]
 pythonVersion = "3.13"
 pythonPlatform = "All"
 typeCheckingMode = "strict"
-venvPath = "."
-venv = ".venv"
 include = ["src"]
 exclude = ["tests", "**/__pycache__"]
 
