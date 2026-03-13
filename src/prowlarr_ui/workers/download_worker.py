@@ -22,7 +22,23 @@ class DownloadWorker(QThread):
     item_downloaded = Signal(str, int, bool)  # (guid, indexer_id, success)
     queue_done = Signal()  # All downloads complete (avoid QThread.finished clash)
 
-    def __init__(self, client: ProwlarrClient, items: list[dict]):
+    @staticmethod
+    def _safe_int(value: object, default: int = 0) -> int:
+        """Convert one queued payload value to int with a fallback."""
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return default
+        return default
+
+    def __init__(self, client: ProwlarrClient, items: list[dict[str, object]]):
         """
         Args:
             client: ProwlarrClient instance
@@ -31,9 +47,9 @@ class DownloadWorker(QThread):
         super().__init__()
         self.client = client
         self._lock = threading.Lock()
-        self._queued_keys: set[tuple[object, object]] = set()
+        self._queued_keys: set[tuple[str, int]] = set()
         self._accepting_new_items = True
-        self.items: list[dict] = []
+        self.items: list[dict[str, object]] = []
         # Normalize initial queue to unique items so duplicates are never processed twice.
         for item in items:
             key = self._item_key(item)
@@ -43,16 +59,21 @@ class DownloadWorker(QThread):
             self.items.append(item)
 
     @staticmethod
-    def _item_key(item: dict):
+    def _item_key(item: dict[str, object]) -> tuple[str, int]:
         """Stable queue identity for deduplication."""
-        return item.get("guid"), item.get("indexer_id")
+        return (
+            str(item.get("guid", "") or ""),
+            DownloadWorker._safe_int(item.get("indexer_id", 0), 0),
+        )
 
-    def add_items(self, new_items: list[dict]) -> list[dict] | None:
+    def add_items(
+        self, new_items: list[dict[str, object]]
+    ) -> list[dict[str, object]] | None:
         """
         Thread-safe append of unique new items to the queue while running.
         Returns None if the worker has already entered shutdown and cannot accept items.
         """
-        added = []
+        added: list[dict[str, object]] = []
         with self._lock:
             if not self._accepting_new_items or self.isInterruptionRequested():
                 return None
@@ -72,9 +93,10 @@ class DownloadWorker(QThread):
                 self._accepting_new_items and not self.isInterruptionRequested()
             )
 
-    def run(self):
+    def run(self) -> None:
         """Process download queue sequentially, picking up newly added items"""
         idx = 0
+        total = 0
         while True:
             with self._lock:
                 if self.isInterruptionRequested():
@@ -86,9 +108,9 @@ class DownloadWorker(QThread):
                     break
                 item = self.items[idx]
 
-            guid = item["guid"]
-            indexer_id = item["indexer_id"]
-            title = item["title"]
+            guid = str(item.get("guid", "") or "")
+            indexer_id = self._safe_int(item.get("indexer_id", 0), 0)
+            title = str(item.get("title", "Unknown") or "Unknown")
 
             if self.isInterruptionRequested():
                 logger.info("DownloadWorker interrupted before item download")
@@ -109,7 +131,7 @@ class DownloadWorker(QThread):
                 )
                 try:
                     # Emit composite identity to disambiguate duplicate GUIDs across indexers.
-                    self.item_downloaded.emit(guid, int(indexer_id), success)
+                    self.item_downloaded.emit(guid, indexer_id, success)
                 except Exception as e:
                     logger.error(f"Failed to emit item_downloaded signal: {e}")
                 if success:
@@ -119,7 +141,7 @@ class DownloadWorker(QThread):
             except Exception as e:
                 logger.error(f"Download {idx + 1}/{total} error: {title} - {e}")
                 try:
-                    self.item_downloaded.emit(guid, int(indexer_id), False)
+                    self.item_downloaded.emit(guid, indexer_id, False)
                 except Exception as emit_error:
                     logger.error(
                         f"Failed to emit error item_downloaded signal: {emit_error}"

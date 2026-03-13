@@ -12,21 +12,29 @@ import sys
 import time
 import traceback
 import webbrowser
+from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import ClassVar
+from typing import Any, ClassVar, TypedDict, cast
 from urllib.parse import quote
 
 from PySide6.QtCore import (
+    QEvent,
     QItemSelection,
     QItemSelectionModel,
+    QObject,
+    QPoint,
+    QStringListModel,
     Qt,
     QTimer,
 )
 from PySide6.QtGui import (
     QAction,
+    QCloseEvent,
     QColor,
     QIcon,
+    QKeyEvent,
     QKeySequence,
+    QMouseEvent,
     QPainter,
     QPen,
     QPixmap,
@@ -69,14 +77,14 @@ from threep_commons.qt.slots import safe_slot
 from threep_commons.quality import parse_quality
 from threep_commons.settings import QSettingsValueStore
 
-from prowlarr_ui.api.everything_search import EverythingSearch
-from prowlarr_ui.api.prowlarr_client import ProwlarrClient
-from prowlarr_ui.constants import APP_IDENTITY, SETTINGS_APP_NAME
-from prowlarr_ui.ui.help_text import HELP_HTML
-from prowlarr_ui.ui.log_window import LogWindow
-from prowlarr_ui.ui.setup_wizard import run_setup_wizard
-from prowlarr_ui.ui.widgets import NumericTableWidgetItem
-from prowlarr_ui.utils.config import (
+from .api.everything_search import EverythingSearch
+from .api.prowlarr_client import ProwlarrClient
+from .constants import APP_IDENTITY, SETTINGS_APP_NAME
+from .ui.help_text import HELP_HTML
+from .ui.log_window import LogWindow
+from .ui.setup_wizard import run_setup_wizard
+from .ui.widgets import NumericTableWidgetItem
+from .utils.config import (
     config_store_file_path,
     ensure_config_exists,
     get_missing_required_config,
@@ -84,10 +92,10 @@ from prowlarr_ui.utils.config import (
     save_config,
     validate_config,
 )
-from prowlarr_ui.workers.download_worker import DownloadWorker
-from prowlarr_ui.workers.everything_worker import EverythingCheckWorker
-from prowlarr_ui.workers.init_worker import InitWorker
-from prowlarr_ui.workers.search_worker import SearchWorker
+from .workers.download_worker import DownloadWorker
+from .workers.everything_worker import EverythingCheckWorker
+from .workers.init_worker import InitWorker
+from .workers.search_worker import SearchWorker
 
 DOWNLOAD_HISTORY_PATH = str(resolve_log_path(APP_IDENTITY, "download_history.log"))
 
@@ -100,6 +108,21 @@ PREFS_NAMESPACE_KEYS = {
     "selected_categories",
 }
 __all__ = ["EverythingSearch", "InitWorker", "MainWindow", "safe_slot"]
+
+type ReleaseDict = dict[str, object]
+type IndexerDict = dict[str, object]
+type CategoryDict = dict[str, object]
+type ReleaseKey = tuple[str, int]
+type EverythingMatches = list[tuple[str, int]]
+type EverythingBatch = list[tuple[int, EverythingMatches]]
+type WorkerThread = InitWorker | SearchWorker | EverythingCheckWorker | DownloadWorker
+
+
+class DeferredEverythingRecheck(TypedDict):
+    """Deferred Everything recheck payload carried across worker boundaries."""
+
+    title_keys: set[str]
+    generation: int
 
 
 class MainWindow(QMainWindow):
@@ -131,7 +154,59 @@ class MainWindow(QMainWindow):
         "Download",
     ]
 
-    def __init__(self):
+    @staticmethod
+    def _object_dict(value: object) -> dict[str, object]:
+        """Normalize one object to a plain string-key dict when possible."""
+        if not isinstance(value, Mapping):
+            return {}
+        mapping = cast("Mapping[object, object]", value)
+        return {str(key): entry for key, entry in mapping.items()}
+
+    @staticmethod
+    def _int_value(value: object, default: int) -> int:
+        """Coerce one object to int with a safe fallback."""
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return default
+        return default
+
+    @staticmethod
+    def _float_value(value: object, default: float) -> float:
+        """Coerce one object to float with a safe fallback."""
+        if isinstance(value, bool):
+            return float(value)
+        if isinstance(value, int | float):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                return default
+        return default
+
+    @staticmethod
+    def _text_value(value: object, default: str = "") -> str:
+        """Normalize one object to text for UI display and command generation."""
+        return str(value or default)
+
+    @staticmethod
+    def _completer_model(completer: QCompleter) -> QStringListModel:
+        """Return the string-list model used by the search-history completer."""
+        return cast("QStringListModel", completer.model())
+
+    def _config_section(self, section_name: str) -> dict[str, object]:
+        """Fetch one top-level config section as a plain object dict."""
+        return self._object_dict(self.config.get(section_name, {}))
+
+    def __init__(self) -> None:
         super().__init__()
         configure_qsettings(APP_IDENTITY)
         self.setWindowTitle("Prowlarr Search Client")
@@ -139,124 +214,137 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(self._create_globe_icon())
 
         # Load and validate runtime configuration from the shared settings store.
-        self.config = load_config()
+        self.config: dict[str, Any] = load_config()
         config_warnings = validate_config(self.config)
         for w in config_warnings:
             logger.warning(f"Config: {w}")
 
         # Get configurable settings
-        settings = self.config.get("settings", {})
-        self.title_match_chars = settings.get("title_match_chars", 42)
-        self.everything_search_chars = settings.get("everything_search_chars", 42)
-        self.everything_recheck_delay = settings.get(
-            "everything_recheck_delay", 6000
-        )  # Delay in ms before rechecking after download
-        self.web_search_url = settings.get(
-            "web_search_url", "https://www.google.com/search?q={query}"
+        settings = self._config_section("settings")
+        self.title_match_chars = self._int_value(
+            settings.get("title_match_chars", 42), 42
         )
-        self.everything_integration_method = settings.get(
-            "everything_integration_method", "sdk"
+        self.everything_search_chars = self._int_value(
+            settings.get("everything_search_chars", 42), 42
         )
-        self.prowlarr_page_size = settings.get("prowlarr_page_size", 100)
-        self.everything_max_results = settings.get("everything_max_results", 5)
-        self.custom_commands = {
-            Qt.Key_F2: settings.get("custom_command_F2", ""),
-            Qt.Key_F3: settings.get("custom_command_F3", ""),
-            Qt.Key_F4: settings.get("custom_command_F4", ""),
+        self.everything_recheck_delay = self._int_value(
+            settings.get("everything_recheck_delay", 6000), 6000
+        )
+        self.web_search_url = self._text_value(
+            settings.get("web_search_url", "https://www.google.com/search?q={query}"),
+            "https://www.google.com/search?q={query}",
+        )
+        self.everything_integration_method = self._text_value(
+            settings.get("everything_integration_method", "sdk"),
+            "sdk",
+        )
+        self.prowlarr_page_size = self._int_value(
+            settings.get("prowlarr_page_size", 100), 100
+        )
+        self.everything_max_results = self._int_value(
+            settings.get("everything_max_results", 5), 5
+        )
+        self.custom_commands: dict[Qt.Key, str] = {
+            Qt.Key.Key_F2: self._text_value(settings.get("custom_command_F2", "")),
+            Qt.Key.Key_F3: self._text_value(settings.get("custom_command_F3", "")),
+            Qt.Key.Key_F4: self._text_value(settings.get("custom_command_F4", "")),
         }
-        self.everything_batch_size = settings.get("everything_batch_size", 10)
+        self.everything_batch_size = self._int_value(
+            settings.get("everything_batch_size", 10), 10
+        )
 
         # Initialize Prowlarr API client (lightweight - just stores config)
         try:
-            prowlarr_config = self.config.get("prowlarr", {})
+            prowlarr_config = self._config_section("prowlarr")
             self.prowlarr = ProwlarrClient(
-                prowlarr_config.get("host", "http://localhost:9696"),
-                prowlarr_config.get("api_key", ""),
-                timeout=settings.get("api_timeout", 300),
-                retries=settings.get("api_retries", 2),
-                http_basic_auth_username=prowlarr_config.get(
-                    "http_basic_auth_username", ""
+                self._text_value(
+                    prowlarr_config.get("host", "http://localhost:9696"),
+                    "http://localhost:9696",
                 ),
-                http_basic_auth_password=prowlarr_config.get(
-                    "http_basic_auth_password", ""
+                self._text_value(prowlarr_config.get("api_key", "")),
+                timeout=self._int_value(settings.get("api_timeout", 300), 300),
+                retries=self._int_value(settings.get("api_retries", 2), 2),
+                http_basic_auth_username=self._text_value(
+                    prowlarr_config.get("http_basic_auth_username", "")
+                ),
+                http_basic_auth_password=self._text_value(
+                    prowlarr_config.get("http_basic_auth_password", "")
                 ),
             )
             logger.info("Prowlarr client initialized")
         except Exception as e:
             logger.error(f"Failed to initialize Prowlarr client: {e}")
-            self.prowlarr = None
+            self.prowlarr: ProwlarrClient | None = None
 
         # Defer Everything search integration to background
-        self.everything = None
+        self.everything: EverythingSearch | None = None
 
         # UI/runtime preferences share the same canonical config store.
         self.preferences_store = QSettingsValueStore.from_identity(
             APP_IDENTITY,
             app_name=SETTINGS_APP_NAME,
         )
-        self.search_history = self.preferences_store.get_str_list(
+        self.search_history: list[str] = self.preferences_store.get_str_list(
             self._pref_key("search_history"),
             [],
         )
 
         # Current search state
-        self.current_worker = None
-        self.everything_check_worker = None
-        self.download_worker = None
-        self.current_results = []
+        self.current_worker: SearchWorker | None = None
+        self.everything_check_worker: EverythingCheckWorker | None = None
+        self.download_worker: DownloadWorker | None = None
+        self.current_results: list[ReleaseDict] = []
         self.current_offset = 0
-        self._video_paths = {}  # (guid, indexer_id) -> video file path from Everything
+        self._video_paths: dict[ReleaseKey, str] = {}
         self._search_generation = (
             0  # Incremented on each new search, used to invalidate stale timers
         )
         self._everything_check_generation = (
             0  # Generation when Everything check started
         )
-        self._pending_everything_check_generation = (
+        self._pending_everything_check_generation: int | None = (
             None  # Deferred generation to run after an in-flight check ends
         )
         # Deferred targeted recheck payload while another Everything worker is active.
-        self._pending_everything_recheck = (
+        self._pending_everything_recheck: DeferredEverythingRecheck | None = (
             None  # {"title_keys": set[str], "generation": int}
         )
         # Composite key avoids collisions when two indexers expose the same GUID.
-        self._downloaded_release_keys = set()  # {(guid, indexer_id), ...}
-        self._downloaded_title_keys = (
-            set()
-        )  # Title keys for Everything recheck scheduling
-        self._release_key_to_row = {}  # (guid, indexer_id) -> row cache for download progress tracking
-        self._active_spinner_tags = {}  # tag -> active reference count
-        self._table_sort_locks = (
-            set()
-        )  # Named sort-lock owners; sorting enabled only when empty
+        self._downloaded_release_keys: set[ReleaseKey] = set()
+        self._downloaded_title_keys: set[str] = set()
+        self._release_key_to_row: dict[ReleaseKey, int] = {}
+        self._active_spinner_tags: dict[str, int] = {}
+        self._table_sort_locks: set[str] = set()
         self._close_retry_pending = False  # Prevent duplicate close retry scheduling
-        self._close_retry_timer = None
+        self._close_retry_timer: QTimer | None = None
         self._shutdown_in_progress = False
-        self._shutdown_interrupted_worker_ids = (
-            set()
-        )  # Worker IDs interrupted in current close cycle
+        self._shutdown_interrupted_worker_ids: set[int] = set()
         self._download_queue_retry_limit = (
             12  # Circuit-breaker for enqueue retry storms
         )
-        self._download_queue_stale_grace_seconds = float(
-            settings.get("download_queue_stale_grace_seconds", 20.0)
+        self._download_queue_stale_grace_seconds = self._float_value(
+            settings.get("download_queue_stale_grace_seconds", 20.0),
+            20.0,
         )
-        self._download_queue_owner_since = (
+        self._download_queue_owner_since: float | None = (
             None  # monotonic timestamp when queue ownership became active
         )
-        self._shutdown_force_after_seconds = float(
-            settings.get("shutdown_force_after_seconds", 15.0)
+        self._shutdown_force_after_seconds = self._float_value(
+            settings.get("shutdown_force_after_seconds", 15.0),
+            15.0,
         )
-        self._shutdown_force_arm_seconds = float(
-            settings.get("shutdown_force_arm_seconds", 8.0)
+        self._shutdown_force_arm_seconds = self._float_value(
+            settings.get("shutdown_force_arm_seconds", 8.0),
+            8.0,
         )
-        self._shutdown_started_monotonic = None
+        self._shutdown_started_monotonic: float | None = None
         self._shutdown_force_prompted = False
-        self._shutdown_force_armed_until = None
-        self._everything_check_stale_grace_seconds = float(
-            settings.get("everything_check_stale_grace_seconds", 20.0)
+        self._shutdown_force_armed_until: float | None = None
+        self._everything_check_stale_grace_seconds = self._float_value(
+            settings.get("everything_check_stale_grace_seconds", 20.0),
+            20.0,
         )
-        self._everything_check_owner_since = None
+        self._everything_check_owner_since: float | None = None
         self._indexers_loaded = (
             False  # True once populate_indexers has restored tree state
         )
@@ -268,14 +356,14 @@ class MainWindow(QMainWindow):
 
         # Multi-page fetch state
         self._load_all_active = False
-        self._load_all_results = []
+        self._load_all_results: list[ReleaseDict] = []
         self._load_all_page = 0
 
         # Worker tracking for proper cleanup
-        self._all_workers = []  # Track all workers for forced cleanup on close
+        self._all_workers: list[WorkerThread] = []
 
         # Timer tracking for proper cleanup
-        self._pending_timers = []  # Track all QTimer.singleShot timers
+        self._pending_timers: list[QTimer] = []
 
         # Splitter save timer for debouncing
         self.splitter_save_timer = QTimer()
@@ -304,7 +392,7 @@ class MainWindow(QMainWindow):
         self.init_worker = InitWorker(
             self.everything_integration_method,
             self.prowlarr,
-            settings.get("everything_sdk_url", ""),
+            self._text_value(settings.get("everything_sdk_url", "")),
         )
         self.init_worker.init_done.connect(self._on_init_done)
         self.init_worker.start()
@@ -433,7 +521,7 @@ class MainWindow(QMainWindow):
             if not hidden and min_size_bytes > 0:
                 size_item = self.results_table.item(row, self.COL_SIZE)
                 if size_item:
-                    size_val = size_item.data(Qt.UserRole)
+                    size_val = size_item.data(Qt.ItemDataRole.UserRole)
                     if size_val is not None and size_val < min_size_bytes:
                         hidden = True
 
@@ -441,7 +529,7 @@ class MainWindow(QMainWindow):
             if not hidden and max_age_days > 0:
                 age_item = self.results_table.item(row, self.COL_AGE)
                 if age_item:
-                    age_val = age_item.data(Qt.UserRole)
+                    age_val = age_item.data(Qt.ItemDataRole.UserRole)
                     if age_val is not None and age_val > max_age_days:
                         hidden = True
 
@@ -499,7 +587,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.activity_bar)
 
         # Horizontal splitter for left panel and center panel
-        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
         main_layout.addWidget(self.splitter)
 
         # Create left and center panels
@@ -552,11 +640,11 @@ class MainWindow(QMainWindow):
 
         # Setup autocomplete from history
         self.completer = QCompleter(self.search_history)
-        self.completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.query_input.setCompleter(self.completer)
 
         # Show suggestions when clicking in the search box
-        def show_completer_on_focus(event):
+        def show_completer_on_focus(event: QMouseEvent) -> None:
             QLineEdit.mousePressEvent(self.query_input, event)
             if not self.query_input.text():
                 self.completer.complete()
@@ -566,8 +654,8 @@ class MainWindow(QMainWindow):
         # Show history on Down arrow in empty search box
         original_key_press = self.query_input.keyPressEvent
 
-        def search_key_press(event):
-            if event.key() == Qt.Key_Down and not self.query_input.text():
+        def search_key_press(event: QKeyEvent) -> None:
+            if event.key() == Qt.Key.Key_Down and not self.query_input.text():
                 self.completer.setCompletionPrefix("")
                 self.completer.complete()
                 return
@@ -772,20 +860,24 @@ class MainWindow(QMainWindow):
         header = self.results_table.horizontalHeader()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(
-            self.COL_TITLE, QHeaderView.Stretch
+            self.COL_TITLE, QHeaderView.ResizeMode.Stretch
         )  # Title column stretches
 
         # Configure table behavior
         self.results_table.setAlternatingRowColors(
             False
         )  # We'll handle colors manually
-        self.results_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.results_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.results_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.results_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.results_table.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection
+        )
+        self.results_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.results_table.setSortingEnabled(True)
 
         # Header right-click to show/hide columns
-        header.setContextMenuPolicy(Qt.CustomContextMenu)
+        header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(self._show_header_context_menu)
 
         # Restore hidden columns from preferences
@@ -811,7 +903,7 @@ class MainWindow(QMainWindow):
         self.results_table.keyPressEvent = self.table_key_press
 
         # Right-click context menu
-        self.results_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.results_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.results_table.customContextMenuRequested.connect(self._show_context_menu)
 
         # Double-click to download
@@ -863,16 +955,16 @@ class MainWindow(QMainWindow):
         """Draw a simple globe icon (circle + meridians + parallels)"""
         size = 64
         pix = QPixmap(size, size)
-        pix.fill(Qt.transparent)
+        pix.fill(Qt.GlobalColor.transparent)
         p = QPainter(pix)
-        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         pen = QPen(QColor(60, 130, 200), 2)
         p.setPen(pen)
         p.setBrush(QColor(180, 220, 255))
         m = 3  # margin
         p.drawEllipse(m, m, size - 2 * m, size - 2 * m)
         # Meridians (vertical ellipses)
-        p.setBrush(Qt.NoBrush)
+        p.setBrush(Qt.BrushStyle.NoBrush)
         cx, cy, r = size // 2, size // 2, size // 2 - m
         for offset in (-r // 3, 0, r // 3):
             w = abs(r - abs(offset))
@@ -892,7 +984,7 @@ class MainWindow(QMainWindow):
         file_menu = menubar.addMenu("&File")
         exit_action = QAction("E&xit", self)
         exit_action.setShortcuts([QKeySequence("Ctrl+Q"), QKeySequence("Alt+X")])
-        exit_action.setShortcutContext(Qt.ApplicationShortcut)
+        exit_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
         exit_action.setStatusTip("Close the application")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -992,13 +1084,18 @@ class MainWindow(QMainWindow):
         browser.setOpenExternalLinks(False)
         browser.setHtml(HELP_HTML)
         layout.addWidget(browser)
-        btn_box = QDialogButtonBox(QDialogButtonBox.Ok)
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         btn_box.accepted.connect(dlg.accept)
         layout.addWidget(btn_box)
         dlg.exec()
 
     @safe_slot
-    def _on_init_done(self, everything, indexers, error):
+    def _on_init_done(
+        self,
+        everything: EverythingSearch | None,
+        indexers: list[IndexerDict],
+        error: str,
+    ) -> None:
         """Handle background init completion - update UI on main thread"""
         self.everything = everything
         if self.everything:
@@ -1020,7 +1117,7 @@ class MainWindow(QMainWindow):
 
         if indexers:
             self.populate_indexers(indexers)
-            categories = self.prowlarr.get_categories()
+            categories: list[CategoryDict] = self.prowlarr.get_categories()
             self.populate_categories(categories)
             self.log(
                 f"Loaded {len(indexers)} indexers and {len(categories)} categories"
@@ -1029,14 +1126,14 @@ class MainWindow(QMainWindow):
         else:
             self.status_label.setText("No indexers found")
 
-    def populate_indexers(self, indexers: list[dict]):
+    def populate_indexers(self, indexers: list[IndexerDict]) -> None:
         """Populate indexers tree with checkboxes"""
         self.indexers_model.clear()
 
         # Root "All" item
         root = QStandardItem("All")
         root.setCheckable(True)
-        root.setCheckState(Qt.Checked)
+        root.setCheckState(Qt.CheckState.Checked)
         self.indexers_model.appendRow(root)
 
         # Load saved indexer selection from INI (None = no saved preference).
@@ -1047,36 +1144,46 @@ class MainWindow(QMainWindow):
 
         # Add each enabled indexer as child
         for indexer in indexers:
-            if indexer.get("enable", False):
-                item = QStandardItem(indexer.get("name", "Unknown"))
-                item.setCheckable(True)
-                item.setData(indexer.get("id"), Qt.UserRole)  # Store ID in user data
+            if not bool(indexer.get("enable", False)):
+                continue
+            indexer_id = self._int_value(indexer.get("id", 0), 0)
+            item = QStandardItem(
+                self._text_value(indexer.get("name", "Unknown"), "Unknown")
+            )
+            item.setCheckable(True)
+            item.setData(indexer_id, Qt.ItemDataRole.UserRole)
 
-                # Restore saved state or default to checked on first run
-                if saved_indexers is not None:
-                    if indexer.get("id") in saved_indexers:
-                        item.setCheckState(Qt.Checked)
-                    else:
-                        item.setCheckState(Qt.Unchecked)
+            # Restore saved state or default to checked on first run
+            if saved_indexers is not None:
+                if indexer_id in saved_indexers:
+                    item.setCheckState(Qt.CheckState.Checked)
                 else:
-                    item.setCheckState(Qt.Checked)
+                    item.setCheckState(Qt.CheckState.Unchecked)
+            else:
+                item.setCheckState(Qt.CheckState.Checked)
 
-                root.appendRow(item)
+            root.appendRow(item)
 
         # Derive parent state from children so restored state is internally consistent.
         if root.rowCount() == 0:
-            root.setCheckState(Qt.Unchecked)
+            root.setCheckState(Qt.CheckState.Unchecked)
         else:
             all_checked = all(
-                root.child(i).checkState() == Qt.Checked for i in range(root.rowCount())
+                root.child(i).checkState() == Qt.CheckState.Checked
+                for i in range(root.rowCount())
             )
             any_checked = any(
-                root.child(i).checkState() == Qt.Checked for i in range(root.rowCount())
+                root.child(i).checkState() == Qt.CheckState.Checked
+                for i in range(root.rowCount())
             )
             root.setCheckState(
-                Qt.Checked
+                Qt.CheckState.Checked
                 if all_checked
-                else (Qt.PartiallyChecked if any_checked else Qt.Unchecked)
+                else (
+                    Qt.CheckState.PartiallyChecked
+                    if any_checked
+                    else Qt.CheckState.Unchecked
+                )
             )
 
         self.indexers_tree.expandAll()
@@ -1091,14 +1198,14 @@ class MainWindow(QMainWindow):
         self._indexers_item_changed_connected = True
         self._indexers_loaded = True
 
-    def populate_categories(self, categories: list[dict]):
+    def populate_categories(self, categories: list[CategoryDict]) -> None:
         """Populate categories tree with checkboxes"""
         self.categories_model.clear()
 
         # Root "All" item
         root = QStandardItem("All")
         root.setCheckable(True)
-        root.setCheckState(Qt.Checked)
+        root.setCheckState(Qt.CheckState.Checked)
         self.categories_model.appendRow(root)
 
         # Load saved category selection from INI (None = no saved preference).
@@ -1109,37 +1216,43 @@ class MainWindow(QMainWindow):
 
         # Add each category with code in brackets
         for category in categories:
-            item = QStandardItem(
-                f"{category.get('name', 'Unknown')} [{category.get('id')}]"
-            )
+            category_id = self._int_value(category.get("id", 0), 0)
+            category_name = self._text_value(category.get("name", "Unknown"), "Unknown")
+            item = QStandardItem(f"{category_name} [{category_id}]")
             item.setCheckable(True)
-            item.setData(category.get("id"), Qt.UserRole)  # Store ID in user data
+            item.setData(category_id, Qt.ItemDataRole.UserRole)
 
             # Restore saved state or default to checked on first run
             if saved_categories is not None:
-                if category.get("id") in saved_categories:
-                    item.setCheckState(Qt.Checked)
+                if category_id in saved_categories:
+                    item.setCheckState(Qt.CheckState.Checked)
                 else:
-                    item.setCheckState(Qt.Unchecked)
+                    item.setCheckState(Qt.CheckState.Unchecked)
             else:
-                item.setCheckState(Qt.Checked)
+                item.setCheckState(Qt.CheckState.Checked)
 
             root.appendRow(item)
 
         # Derive parent state from children so restored state is internally consistent.
         if root.rowCount() == 0:
-            root.setCheckState(Qt.Unchecked)
+            root.setCheckState(Qt.CheckState.Unchecked)
         else:
             all_checked = all(
-                root.child(i).checkState() == Qt.Checked for i in range(root.rowCount())
+                root.child(i).checkState() == Qt.CheckState.Checked
+                for i in range(root.rowCount())
             )
             any_checked = any(
-                root.child(i).checkState() == Qt.Checked for i in range(root.rowCount())
+                root.child(i).checkState() == Qt.CheckState.Checked
+                for i in range(root.rowCount())
             )
             root.setCheckState(
-                Qt.Checked
+                Qt.CheckState.Checked
                 if all_checked
-                else (Qt.PartiallyChecked if any_checked else Qt.Unchecked)
+                else (
+                    Qt.CheckState.PartiallyChecked
+                    if any_checked
+                    else Qt.CheckState.Unchecked
+                )
             )
 
         self.categories_tree.expandAll()
@@ -1168,15 +1281,21 @@ class MainWindow(QMainWindow):
         elif item.parent() == root:
             self.indexers_model.blockSignals(True)
             all_checked = all(
-                root.child(i).checkState() == Qt.Checked for i in range(root.rowCount())
+                root.child(i).checkState() == Qt.CheckState.Checked
+                for i in range(root.rowCount())
             )
             any_checked = any(
-                root.child(i).checkState() == Qt.Checked for i in range(root.rowCount())
+                root.child(i).checkState() == Qt.CheckState.Checked
+                for i in range(root.rowCount())
             )
             root.setCheckState(
-                Qt.Checked
+                Qt.CheckState.Checked
                 if all_checked
-                else (Qt.PartiallyChecked if any_checked else Qt.Unchecked)
+                else (
+                    Qt.CheckState.PartiallyChecked
+                    if any_checked
+                    else Qt.CheckState.Unchecked
+                )
             )
             self.indexers_model.blockSignals(False)
 
@@ -1199,16 +1318,21 @@ class MainWindow(QMainWindow):
             self.categories_model.blockSignals(True)
             # Update parent "All" based on children states
             all_checked = all(
-                root.child(i).checkState() == Qt.Checked for i in range(root.rowCount())
+                root.child(i).checkState() == Qt.CheckState.Checked
+                for i in range(root.rowCount())
             )
             any_checked = any(
-                root.child(i).checkState() != Qt.Unchecked
+                root.child(i).checkState() != Qt.CheckState.Unchecked
                 for i in range(root.rowCount())
             )
             root.setCheckState(
-                Qt.Checked
+                Qt.CheckState.Checked
                 if all_checked
-                else (Qt.PartiallyChecked if any_checked else Qt.Unchecked)
+                else (
+                    Qt.CheckState.PartiallyChecked
+                    if any_checked
+                    else Qt.CheckState.Unchecked
+                )
             )
             self.categories_model.blockSignals(False)
 
@@ -1228,18 +1352,19 @@ class MainWindow(QMainWindow):
             return []
 
         all_checked = all(
-            root.child(i).checkState() == Qt.Checked for i in range(root.rowCount())
+            root.child(i).checkState() == Qt.CheckState.Checked
+            for i in range(root.rowCount())
         )
         if all_checked:
             return None
 
         # Return explicit checked indexers (possibly empty when user deselects all).
-        selected = []
+        selected: list[int] = []
         for i in range(root.rowCount()):
             child = root.child(i)
-            if child.checkState() == Qt.Checked:
-                indexer_id = child.data(Qt.UserRole)
-                if indexer_id:
+            if child.checkState() == Qt.CheckState.Checked:
+                indexer_id = self._int_value(child.data(Qt.ItemDataRole.UserRole), -1)
+                if indexer_id >= 0:
                     selected.append(indexer_id)
 
         return selected
@@ -1260,18 +1385,19 @@ class MainWindow(QMainWindow):
             return []
 
         all_checked = all(
-            root.child(i).checkState() == Qt.Checked for i in range(root.rowCount())
+            root.child(i).checkState() == Qt.CheckState.Checked
+            for i in range(root.rowCount())
         )
         if all_checked:
             return None
 
         # Return explicit checked categories (possibly empty when user deselects all).
-        selected = []
+        selected: list[int] = []
         for i in range(root.rowCount()):
             child = root.child(i)
-            if child.checkState() == Qt.Checked:
-                category_id = child.data(Qt.UserRole)
-                if category_id:
+            if child.checkState() == Qt.CheckState.Checked:
+                category_id = self._int_value(child.data(Qt.ItemDataRole.UserRole), -1)
+                if category_id >= 0:
                     selected.append(category_id)
 
         return selected
@@ -1298,12 +1424,12 @@ class MainWindow(QMainWindow):
         root = self.indexers_model.item(0)
         if not root:
             return []
-        ids = []
+        ids: list[int] = []
         for i in range(root.rowCount()):
             child = root.child(i)
-            if child.checkState() == Qt.Checked:
-                indexer_id = child.data(Qt.UserRole)
-                if indexer_id:
+            if child.checkState() == Qt.CheckState.Checked:
+                indexer_id = self._int_value(child.data(Qt.ItemDataRole.UserRole), -1)
+                if indexer_id >= 0:
                     ids.append(indexer_id)
         return ids
 
@@ -1312,12 +1438,12 @@ class MainWindow(QMainWindow):
         root = self.categories_model.item(0)
         if not root:
             return []
-        ids = []
+        ids: list[int] = []
         for i in range(root.rowCount()):
             child = root.child(i)
-            if child.checkState() == Qt.Checked:
-                cat_id = child.data(Qt.UserRole)
-                if cat_id:
+            if child.checkState() == Qt.CheckState.Checked:
+                cat_id = self._int_value(child.data(Qt.ItemDataRole.UserRole), -1)
+                if cat_id >= 0:
                     ids.append(cat_id)
         return ids
 
@@ -1341,7 +1467,11 @@ class MainWindow(QMainWindow):
         action = QAction(query.replace("&", "&&"), self)
         action.setData(query)
         action.setStatusTip(f'Search for "{query}"')
-        action.triggered.connect(lambda checked, q=query: self._search_bookmark(q))
+
+        def trigger_bookmark(_checked: bool = False, q: str = query) -> None:
+            self._search_bookmark(q)
+
+        action.triggered.connect(trigger_bookmark)
         self.bookmarks_menu.addAction(action)
 
     @safe_slot
@@ -1580,7 +1710,7 @@ class MainWindow(QMainWindow):
             self.search_history.remove(query)
         self.search_history.insert(0, query)
         self.search_history = self.search_history[:50]  # Keep last 50
-        self.completer.model().setStringList(self.search_history)
+        self._completer_model(self.completer).setStringList(self.search_history)
 
         scope = self._resolve_search_scope()
         if scope is None:
@@ -1626,9 +1756,11 @@ class MainWindow(QMainWindow):
         self.prowlarr_page_number_spinbox.blockSignals(False)
 
         # Create and start worker thread
+        client = self.prowlarr
+
         try:
             self.current_worker = SearchWorker(
-                self.prowlarr,
+                client,
                 query,
                 indexer_ids,
                 categories,
@@ -1643,15 +1775,13 @@ class MainWindow(QMainWindow):
             return
         self._track_worker(self.current_worker)
         self.current_worker.search_done.connect(
-            lambda results, elapsed, w=self.current_worker: self.page_fetch_finished(
-                results, elapsed, w
-            )
+            self._search_done_callback(self.current_worker)
         )
         self.current_worker.error.connect(
-            lambda error, w=self.current_worker: self.search_error(error, w)
+            self._search_error_callback(self.current_worker)
         )
         self.current_worker.progress.connect(
-            lambda message, w=self.current_worker: self.on_search_progress(message, w)
+            self._search_progress_callback(self.current_worker)
         )
         try:
             self.current_worker.start()
@@ -1718,7 +1848,7 @@ class MainWindow(QMainWindow):
             self.search_history.remove(query)
         self.search_history.insert(0, query)
         self.search_history = self.search_history[:50]
-        self.completer.model().setStringList(self.search_history)
+        self._completer_model(self.completer).setStringList(self.search_history)
 
         scope = self._resolve_search_scope()
         if scope is None:
@@ -1780,9 +1910,19 @@ class MainWindow(QMainWindow):
         offset = (self._load_all_page - 1) * self.prowlarr_page_size
 
         self.status_label.setText(f"Loading page {self._load_all_page}...")
+        client = self.prowlarr
+        if client is None:
+            self._load_all_active = False
+            self.search_btn.setEnabled(True)
+            self.load_all_btn.setText("Load A&ll")
+            self.load_all_btn.setEnabled(True)
+            self._release_table_sort_lock("search")
+            self.status_label.setText("Prowlarr client not initialized")
+            return
+
         try:
             self.current_worker = SearchWorker(
-                self.prowlarr,
+                client,
                 query,
                 indexer_ids,
                 categories,
@@ -1801,15 +1941,13 @@ class MainWindow(QMainWindow):
             return
         self._track_worker(self.current_worker)
         self.current_worker.search_done.connect(
-            lambda results, elapsed, w=self.current_worker: self.page_fetch_finished(
-                results, elapsed, w
-            )
+            self._search_done_callback(self.current_worker)
         )
         self.current_worker.error.connect(
-            lambda error, w=self.current_worker: self.search_error(error, w)
+            self._search_error_callback(self.current_worker)
         )
         self.current_worker.progress.connect(
-            lambda message, w=self.current_worker: self.on_search_progress(message, w)
+            self._search_progress_callback(self.current_worker)
         )
         try:
             self.current_worker.start()
@@ -1869,9 +2007,11 @@ class MainWindow(QMainWindow):
         self._pending_everything_recheck = None
 
         # Create and start worker thread
+        client = self.prowlarr
+
         try:
             self.current_worker = SearchWorker(
-                self.prowlarr,
+                client,
                 query,
                 indexer_ids,
                 categories,
@@ -1886,15 +2026,13 @@ class MainWindow(QMainWindow):
             return
         self._track_worker(self.current_worker)
         self.current_worker.search_done.connect(
-            lambda results, elapsed, w=self.current_worker: self.page_fetch_finished(
-                results, elapsed, w
-            )
+            self._search_done_callback(self.current_worker)
         )
         self.current_worker.error.connect(
-            lambda error, w=self.current_worker: self.search_error(error, w)
+            self._search_error_callback(self.current_worker)
         )
         self.current_worker.progress.connect(
-            lambda message, w=self.current_worker: self.on_search_progress(message, w)
+            self._search_progress_callback(self.current_worker)
         )
         try:
             self.current_worker.start()
@@ -1910,10 +2048,10 @@ class MainWindow(QMainWindow):
 
         self.start_spinner("search")
 
-    def _track_worker(self, worker):
+    def _track_worker(self, worker: WorkerThread | None) -> None:
         """Track a worker for cleanup on app close"""
 
-        def _safe_is_running(w) -> bool:
+        def _safe_is_running(w: WorkerThread | None) -> bool:
             try:
                 return bool(w and hasattr(w, "isRunning") and w.isRunning())
             except Exception:
@@ -1957,7 +2095,7 @@ class MainWindow(QMainWindow):
         if self._prefs_dirty:
             self._sync_preferences()
 
-    def _schedule_timer(self, delay_ms: int, callback):
+    def _schedule_timer(self, delay_ms: int, callback: Callable[[], None]) -> QTimer:
         """
         Schedule a QTimer.singleShot with tracking for cleanup
         Prevents timers from firing after window closes
@@ -1967,7 +2105,7 @@ class MainWindow(QMainWindow):
         self._pending_timers.append(timer)
 
         # Wrap callback to auto-cleanup timer from tracking list
-        def cleanup_wrapper():
+        def cleanup_wrapper() -> None:
             try:
                 callback()
             except Exception:
@@ -1982,7 +2120,9 @@ class MainWindow(QMainWindow):
         timer.start(delay_ms)
         return timer
 
-    def _wait_worker(self, worker, name: str, timeout_ms: int = 3000):
+    def _wait_worker(
+        self, worker: WorkerThread | None, name: str, timeout_ms: int = 3000
+    ) -> bool:
         """Wait for a worker thread to finish with cooperative cancellation first."""
         if not worker:
             return True
@@ -2005,10 +2145,97 @@ class MainWindow(QMainWindow):
         )
         return False
 
+    def _search_done_callback(
+        self, worker: SearchWorker
+    ) -> Callable[[list[ReleaseDict], float], None]:
+        """Bind one search worker completion signal to the current page handler."""
+
+        def handle(results: list[ReleaseDict], elapsed: float) -> None:
+            self.page_fetch_finished(results, elapsed, worker)
+
+        return handle
+
+    def _search_error_callback(self, worker: SearchWorker) -> Callable[[str], None]:
+        """Bind one search worker error signal to the current error handler."""
+
+        def handle(error: str) -> None:
+            self.search_error(error, worker)
+
+        return handle
+
+    def _search_progress_callback(self, worker: SearchWorker) -> Callable[[str], None]:
+        """Bind one search worker progress signal to the status updater."""
+
+        def handle(message: str) -> None:
+            self.on_search_progress(message, worker)
+
+        return handle
+
+    def _everything_batch_callback(
+        self, worker: EverythingCheckWorker
+    ) -> Callable[[EverythingBatch], None]:
+        """Bind one Everything batch signal to the main-thread update handler."""
+
+        def handle(batch: EverythingBatch) -> None:
+            self.on_everything_batch_ready(batch, worker)
+
+        return handle
+
+    def _everything_done_callback(
+        self, worker: EverythingCheckWorker
+    ) -> Callable[[], None]:
+        """Bind one Everything completion signal to the ownership clearer."""
+
+        def handle() -> None:
+            self.on_everything_check_finished(worker)
+
+        return handle
+
+    def _everything_progress_callback(
+        self, worker: EverythingCheckWorker
+    ) -> Callable[[int, int], None]:
+        """Bind one Everything progress signal to the status updater."""
+
+        def handle(checked: int, total: int) -> None:
+            self._on_everything_progress(checked, total, worker)
+
+        return handle
+
+    def _download_progress_callback(
+        self, worker: DownloadWorker
+    ) -> Callable[[int, int, str], None]:
+        """Bind one download queue progress signal to the row updater."""
+
+        def handle(current: int, total: int, title: str) -> None:
+            self.on_download_progress(current, total, title, worker)
+
+        return handle
+
+    def _download_item_callback(
+        self, worker: DownloadWorker
+    ) -> Callable[[str, int, bool], None]:
+        """Bind one item-completion signal to the download result handler."""
+
+        def handle(guid: str, indexer_id: int, success: bool) -> None:
+            self.on_item_downloaded(guid, indexer_id, success, worker)
+
+        return handle
+
+    def _download_done_callback(self, worker: DownloadWorker) -> Callable[[], None]:
+        """Bind one queue completion signal to the queue cleanup handler."""
+
+        def handle() -> None:
+            self.on_download_queue_finished(worker)
+
+        return handle
+
     @safe_slot
     def page_fetch_finished(
-        self, results: list[dict], elapsed: float = 0.0, worker=None
-    ):
+        self,
+        results: list[ReleaseDict],
+        elapsed: float = 0.0,
+        worker: SearchWorker | None = None,
+    ) -> None:
         """Handle completed page fetch - loads only one page at a time"""
         if worker is not None and worker is not self.current_worker:
             return
@@ -2069,9 +2296,9 @@ class MainWindow(QMainWindow):
         self._restore_column_widths()
 
         # Build per-indexer stats
-        indexer_counts = {}
+        indexer_counts: dict[str, int] = {}
         for r in results:
-            name = r.get("indexer", "Unknown")
+            name = self._text_value(r.get("indexer", "Unknown"), "Unknown")
             indexer_counts[name] = indexer_counts.get(name, 0) + 1
         if indexer_counts:
             parts = [
@@ -2092,7 +2319,7 @@ class MainWindow(QMainWindow):
         self.apply_default_sort()
 
     @safe_slot
-    def search_error(self, error: str, worker=None):
+    def search_error(self, error: str, worker: SearchWorker | None = None) -> None:
         """Handle search error"""
         if worker is not None and worker is not self.current_worker:
             return
@@ -2118,14 +2345,16 @@ class MainWindow(QMainWindow):
         self.status_label.setText(error_msg)
 
     @safe_slot
-    def on_search_progress(self, message: str, worker=None):
+    def on_search_progress(
+        self, message: str, worker: SearchWorker | None = None
+    ) -> None:
         """Update status for active search worker only."""
         if worker is not None and worker is not self.current_worker:
             return
         self.update_status(message)
 
     @safe_slot
-    def apply_default_sort(self):
+    def apply_default_sort(self) -> None:
         """
         Apply custom multi-column sort: Title ASC, then Indexer DESC, then Age ASC
         Sorts the current_results and redisplays the table
@@ -2146,13 +2375,15 @@ class MainWindow(QMainWindow):
 
         # Sort using cached tuple keys (avoids redundant .lower() calls)
         # Key: (title_lower ASC, indexer_lower_inverted DESC, age ASC)
-        def sort_key(r):
+        def sort_key(r: ReleaseDict) -> tuple[str, list[int], int]:
+            title = self._text_value(r.get("title", ""), "")
+            indexer = self._text_value(r.get("indexer", ""), "")
             return (
-                r.get("title", "").lower(),
+                title.lower(),
                 # Invert string for descending: negate each char ordinal
-                [-ord(c) for c in r.get("indexer", "").lower()],
+                [-ord(c) for c in indexer.lower()],
                 # Keep age positive so smaller day-counts sort first (true ASC).
-                (r.get("age") or 0),
+                self._int_value(r.get("age", 0), 0),
             )
 
         self.current_results.sort(key=sort_key)
@@ -2164,7 +2395,7 @@ class MainWindow(QMainWindow):
             self.display_results(self.current_results)
             # Clear sort indicator before lock release to prevent implicit auto-resort.
             self.results_table.horizontalHeader().setSortIndicator(
-                -1, Qt.AscendingOrder
+                -1, Qt.SortOrder.AscendingOrder
             )
         finally:
             self._release_table_sort_lock("render")
@@ -2209,15 +2440,9 @@ class MainWindow(QMainWindow):
         self.everything_check_worker = worker
         self._everything_check_owner_since = time.monotonic()
         self._track_worker(worker)
-        worker.batch_ready.connect(
-            lambda batch, w=worker: self.on_everything_batch_ready(batch, w)
-        )
-        worker.check_done.connect(lambda w=worker: self.on_everything_check_finished(w))
-        worker.progress.connect(
-            lambda checked, total, w=worker: self._on_everything_progress(
-                checked, total, w
-            )
-        )
+        worker.batch_ready.connect(self._everything_batch_callback(worker))
+        worker.check_done.connect(self._everything_done_callback(worker))
+        worker.progress.connect(self._everything_progress_callback(worker))
         self._acquire_table_sort_lock("everything")
         self.start_spinner("everything")
 
@@ -2230,7 +2455,11 @@ class MainWindow(QMainWindow):
         logger.info(f"Started Everything check for {len(self.current_results)} results")
 
     @safe_slot
-    def on_everything_batch_ready(self, batch: list, worker=None):
+    def on_everything_batch_ready(
+        self,
+        batch: EverythingBatch,
+        worker: EverythingCheckWorker | None = None,
+    ) -> None:
         """Process a batch of Everything check results"""
         if worker is not None and worker is not self.everything_check_worker:
             return
@@ -2249,7 +2478,11 @@ class MainWindow(QMainWindow):
             # Set tooltip with found results (FileName - Size), limited to configured max
             # Get release size for comparison
             size_item = self.results_table.item(row, self.COL_SIZE)
-            release_size = size_item.data(Qt.UserRole) if size_item else 0
+            release_size = (
+                self._int_value(size_item.data(Qt.ItemDataRole.UserRole), 0)
+                if size_item
+                else 0
+            )
 
             tooltip_lines = [
                 f"Found in Everything (release: {format_size(release_size)}):"
@@ -2278,7 +2511,12 @@ class MainWindow(QMainWindow):
                 self.results_table.setRowHidden(row, True)
 
     @safe_slot
-    def _on_everything_progress(self, checked: int, total: int, worker=None):
+    def _on_everything_progress(
+        self,
+        checked: int,
+        total: int,
+        worker: EverythingCheckWorker | None = None,
+    ) -> None:
         """Update status bar with Everything check progress"""
         if worker is not None and worker is not self.everything_check_worker:
             return
@@ -2287,7 +2525,9 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Checking Everything: {checked}/{total}")
 
     @safe_slot
-    def on_everything_check_finished(self, worker=None):
+    def on_everything_check_finished(
+        self, worker: EverythingCheckWorker | None = None
+    ) -> None:
         """Cleanup when Everything check completes"""
         if worker is not None and worker is not self.everything_check_worker:
             return
@@ -2314,13 +2554,15 @@ class MainWindow(QMainWindow):
         # Replay deferred targeted rechecks once the in-flight worker is done.
         self._run_deferred_everything_recheck()
 
-    def _queue_deferred_everything_recheck(self, title_keys: set, generation: int):
+    def _queue_deferred_everything_recheck(
+        self, title_keys: set[str], generation: int
+    ) -> None:
         """Merge/queue a targeted recheck payload for later execution."""
         if not title_keys:
             return
-        if (expected := self._pending_everything_recheck) and expected.get(
+        if (expected := self._pending_everything_recheck) and expected[
             "generation"
-        ) == generation:
+        ] == generation:
             expected["title_keys"].update(title_keys)
             return
         self._pending_everything_recheck = {
@@ -2328,7 +2570,7 @@ class MainWindow(QMainWindow):
             "generation": generation,
         }
 
-    def _run_deferred_everything_recheck(self):
+    def _run_deferred_everything_recheck(self) -> None:
         """Run a deferred targeted recheck when safe."""
         if self._shutdown_in_progress:
             self._pending_everything_recheck = None
@@ -2336,14 +2578,15 @@ class MainWindow(QMainWindow):
         pending = self._pending_everything_recheck
         if not pending:
             return
-        if pending.get("generation") != self._search_generation:
+        if pending["generation"] != self._search_generation:
             self._pending_everything_recheck = None
             return
         if self._is_everything_check_active():
             return
         self._pending_everything_recheck = None
         self._recheck_everything_for_titles(
-            set(pending.get("title_keys", set())), pending.get("generation")
+            set(pending["title_keys"]),
+            pending["generation"],
         )
 
     @safe_slot
@@ -2396,7 +2639,7 @@ class MainWindow(QMainWindow):
         sort_col = header.sortIndicatorSection()
         sort_order = header.sortIndicatorOrder()
         if 0 <= sort_col < len(self.COL_HEADERS):
-            direction = "ASC" if sort_order == Qt.AscendingOrder else "DESC"
+            direction = "ASC" if sort_order == Qt.SortOrder.AscendingOrder else "DESC"
             sort_info = f"{self.COL_HEADERS[sort_col]} {direction}"
         else:
             sort_info = "default"
@@ -2419,7 +2662,7 @@ class MainWindow(QMainWindow):
             return
 
         # Build list of (row_index, title_key) for current sort order
-        row_data = []
+        row_data: list[tuple[int, str]] = []
         for row in range(row_count):
             title_item = self.results_table.item(row, self.COL_TITLE)
             if title_item:
@@ -2428,7 +2671,7 @@ class MainWindow(QMainWindow):
                 row_data.append((row, title_key))
 
         # Assign colors avoiding adjacent duplicates
-        title_to_color = {}
+        title_to_color: dict[str, QColor] = {}
         color_index = 0
         last_color_idx = -1
 
@@ -2455,8 +2698,8 @@ class MainWindow(QMainWindow):
                     item.setBackground(color)
 
     def _recheck_everything_for_titles(
-        self, title_keys: set, expected_generation: int | None = None
-    ):
+        self, title_keys: set[str], expected_generation: int | None = None
+    ) -> None:
         """
         Re-check Everything for all rows matching any of the given title prefixes.
         Called after download with configurable delay.
@@ -2484,7 +2727,7 @@ class MainWindow(QMainWindow):
             return
 
         # Collect rows matching any of the title groups
-        recheck_results = []
+        recheck_results: list[ReleaseDict] = []
         for check_row in range(self.results_table.rowCount()):
             check_title_item = self.results_table.item(check_row, self.COL_TITLE)
             if check_title_item:
@@ -2507,9 +2750,14 @@ class MainWindow(QMainWindow):
         self._everything_check_generation = self._search_generation
 
         # Run recheck on background worker
+        everything = self.everything
+        if everything is None:
+            self._release_table_sort_lock("everything")
+            return
+
         try:
             worker = EverythingCheckWorker(
-                self.everything,
+                everything,
                 recheck_results,
                 self.title_match_chars,
                 self.everything_search_chars,
@@ -2524,12 +2772,12 @@ class MainWindow(QMainWindow):
         self._track_worker(worker)
 
         # Build title -> worker index map for resolving rows at batch delivery time
-        recheck_title_map = {}  # worker index -> title string
+        recheck_title_map: dict[int, str] = {}
         for i, result in enumerate(recheck_results):
-            recheck_title_map[i] = result["title"]
+            recheck_title_map[i] = self._text_value(result["title"], "Unknown")
 
         # Snapshot every current row for each title so duplicate titles are all updated.
-        title_to_rows = {}
+        title_to_rows: dict[str, list[int]] = {}
         for r in range(self.results_table.rowCount()):
             item = self.results_table.item(r, self.COL_TITLE)
             if not item:
@@ -2537,12 +2785,14 @@ class MainWindow(QMainWindow):
             title_to_rows.setdefault(item.text(), []).append(r)
 
         # Remap worker row indices to actual table rows by title lookup (sort-safe)
-        def on_recheck_batch(batch, sender_worker):
+        def on_recheck_batch(
+            batch: EverythingBatch, sender_worker: EverythingCheckWorker
+        ) -> None:
             try:
                 if sender_worker is not self.everything_check_worker:
                     return
-                remapped = []
-                seen_rows = set()
+                remapped: EverythingBatch = []
+                seen_rows: set[int] = set()
                 for idx, results in batch:
                     title = recheck_title_map.get(idx)
                     if title is None:
@@ -2559,13 +2809,12 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logger.error(f"Error in on_recheck_batch: {e}")
 
-        worker.batch_ready.connect(lambda batch, w=worker: on_recheck_batch(batch, w))
-        worker.check_done.connect(lambda w=worker: self.on_everything_check_finished(w))
-        worker.progress.connect(
-            lambda checked, total, w=worker: self._on_everything_progress(
-                checked, total, w
-            )
-        )
+        def handle_recheck_batch(batch: EverythingBatch) -> None:
+            on_recheck_batch(batch, worker)
+
+        worker.batch_ready.connect(handle_recheck_batch)
+        worker.check_done.connect(self._everything_done_callback(worker))
+        worker.progress.connect(self._everything_progress_callback(worker))
         self.start_spinner("everything")
         try:
             worker.start()
@@ -2592,7 +2841,7 @@ class MainWindow(QMainWindow):
 
     def _save_column_widths(self):
         """Save current column widths to INI preferences."""
-        widths = []
+        widths: list[int] = []
         for col in range(self.COL_COUNT):
             if col == self.COL_TITLE:
                 continue  # Title column stretches, skip
@@ -2629,7 +2878,7 @@ class MainWindow(QMainWindow):
             self.results_table.resizeColumnToContents(col)
         # Keep title as adaptive stretch column after fitting other columns.
         self.results_table.horizontalHeader().setSectionResizeMode(
-            self.COL_TITLE, QHeaderView.Stretch
+            self.COL_TITLE, QHeaderView.ResizeMode.Stretch
         )
         self._save_column_widths()
         self._schedule_preferences_sync()
@@ -2643,7 +2892,7 @@ class MainWindow(QMainWindow):
         self.results_table.resizeColumnsToContents()
         # Re-set Title to stretch mode
         self.results_table.horizontalHeader().setSectionResizeMode(
-            self.COL_TITLE, QHeaderView.Stretch
+            self.COL_TITLE, QHeaderView.ResizeMode.Stretch
         )
         # Clear saved widths and hidden columns
         self.preferences_store.remove(self._pref_key("column_widths"))
@@ -2651,7 +2900,7 @@ class MainWindow(QMainWindow):
         self._schedule_preferences_sync()
         self.status_label.setText("View reset: all columns visible, default widths")
 
-    def display_results(self, results: list[dict]):
+    def display_results(self, results: list[ReleaseDict]) -> None:
         """
         Display search results in table
         Groups by title (configurable chars) with 24 alternating colors
@@ -2669,7 +2918,7 @@ class MainWindow(QMainWindow):
         colors = self.get_palette_colors()
 
         # Track colors for title groups
-        title_colors = {}
+        title_colors: dict[str, QColor] = {}
         color_index = 0
 
         for result in results:
@@ -2677,17 +2926,15 @@ class MainWindow(QMainWindow):
             self.results_table.insertRow(row)
 
             # Age column (sortable by numeric value, age is in days)
-            age = result.get("age") or 0
+            age = self._int_value(result.get("age", 0), 0)
             age_str = format_age(age)
             age_item = NumericTableWidgetItem(age_str)
-            age_item.setData(Qt.UserRole, age)  # Store numeric value for sorting
+            age_item.setData(Qt.ItemDataRole.UserRole, age)
             self.results_table.setItem(row, self.COL_AGE, age_item)
 
             # Title column
-            title = result.get("title", "Unknown")
-            title_key = title[
-                : self.title_match_chars
-            ].lower()  # Group by configurable chars
+            title = self._text_value(result.get("title", "Unknown"), "Unknown")
+            title_key = title[: self.title_match_chars].lower()
 
             # Assign color to this title group from 24-color palette
             if title_key not in title_colors:
@@ -2703,57 +2950,77 @@ class MainWindow(QMainWindow):
             self.results_table.setItem(row, self.COL_QUALITY, quality_item)
 
             # Size column (sortable by numeric value)
-            size = result.get("size") or 0
+            size = self._int_value(result.get("size", 0), 0)
             size_str = format_size(size)
             size_item = NumericTableWidgetItem(size_str)
-            size_item.setData(Qt.UserRole, size)  # Store numeric value for sorting
+            size_item.setData(Qt.ItemDataRole.UserRole, size)
             self.results_table.setItem(row, self.COL_SIZE, size_item)
 
             # Seeders column
-            seeders = result.get("seeders")
+            seeders_value = result.get("seeders")
+            seeders = (
+                None if seeders_value is None else self._int_value(seeders_value, -1)
+            )
             seeders_item = NumericTableWidgetItem(
                 str(seeders) if seeders is not None else ""
             )
-            seeders_item.setData(Qt.UserRole, seeders if seeders is not None else -1)
+            seeders_item.setData(
+                Qt.ItemDataRole.UserRole,
+                seeders if seeders is not None else -1,
+            )
             self.results_table.setItem(row, self.COL_SEEDERS, seeders_item)
 
             # Leechers column
-            leechers = result.get("leechers")
+            leechers_value = result.get("leechers")
+            leechers = (
+                None if leechers_value is None else self._int_value(leechers_value, -1)
+            )
             leechers_item = NumericTableWidgetItem(
                 str(leechers) if leechers is not None else ""
             )
-            leechers_item.setData(Qt.UserRole, leechers if leechers is not None else -1)
+            leechers_item.setData(
+                Qt.ItemDataRole.UserRole,
+                leechers if leechers is not None else -1,
+            )
             self.results_table.setItem(row, self.COL_LEECHERS, leechers_item)
 
             # Grabs column
-            grabs = result.get("grabs")
+            grabs_value = result.get("grabs")
+            grabs = None if grabs_value is None else self._int_value(grabs_value, -1)
             grabs_item = NumericTableWidgetItem(str(grabs) if grabs is not None else "")
-            grabs_item.setData(Qt.UserRole, grabs if grabs is not None else -1)
+            grabs_item.setData(
+                Qt.ItemDataRole.UserRole,
+                grabs if grabs is not None else -1,
+            )
             self.results_table.setItem(row, self.COL_GRABS, grabs_item)
 
             # Indexer column
-            indexer = result.get("indexer", "Unknown")
+            indexer = self._text_value(result.get("indexer", "Unknown"), "Unknown")
             indexer_item = QTableWidgetItem(indexer)
             self.results_table.setItem(row, self.COL_INDEXER, indexer_item)
 
             # Download button
             download_btn = QPushButton("Download")
-            download_btn.setProperty("guid", result.get("guid"))
-            download_btn.setProperty("indexerId", result.get("indexerId"))
-            download_btn.setProperty("title", title)  # Store title for later
-            download_btn.clicked.connect(
-                lambda checked, btn=download_btn: self._download_from_button(btn)
-            )
+            guid = self._text_value(result.get("guid", ""))
+            indexer_id = self._int_value(result.get("indexerId", -1), -1)
+            download_btn.setProperty("guid", guid)
+            download_btn.setProperty("indexerId", indexer_id)
+            download_btn.setProperty("title", title)
+
+            def click_download(
+                _checked: bool = False, btn: QPushButton = download_btn
+            ) -> None:
+                self._download_from_button(btn)
+
+            download_btn.clicked.connect(click_download)
             self.results_table.setCellWidget(row, self.COL_DOWNLOAD, download_btn)
 
             # Apply background color to row (same color for same title group)
             # Re-apply downloaded state (dark red text) if GUID was previously downloaded
-            guid = result.get("guid")
-            indexer_id = result.get("indexerId")
             release_key = (guid, indexer_id)
             is_downloaded = (
-                guid is not None
-                and indexer_id is not None
+                bool(guid)
+                and indexer_id >= 0
                 and release_key in self._downloaded_release_keys
             )
             for col in range(self.COL_DOWNLOAD):  # Don't color button column
@@ -2763,31 +3030,31 @@ class MainWindow(QMainWindow):
                     if is_downloaded:
                         item.setForeground(QColor(139, 0, 0))
 
-    def _collect_row_download_item(self, row: int) -> dict | None:
+    def _collect_row_download_item(self, row: int) -> ReleaseDict | None:
         """Extract download info from a table row"""
         button = self.results_table.cellWidget(row, self.COL_DOWNLOAD)
         if not button:
             return None
-        guid = button.property("guid")
-        indexer_id = button.property("indexerId")
-        title = button.property("title")
+        guid = self._text_value(button.property("guid"), "")
+        indexer_id = self._int_value(button.property("indexerId"), -1)
+        title = self._text_value(button.property("title"), "Unknown")
         # Accept indexer_id=0 as valid; only reject missing id or empty guid.
-        if guid in (None, "") or indexer_id is None:
+        if not guid or indexer_id < 0:
             return None
         return {"guid": guid, "indexer_id": indexer_id, "title": title}
 
-    def _get_release_key_for_row(self, row: int) -> tuple[str, int] | None:
+    def _get_release_key_for_row(self, row: int) -> ReleaseKey | None:
         """Resolve stable release key from a row's download button metadata."""
         button = self.results_table.cellWidget(row, self.COL_DOWNLOAD)
         if not button:
             return None
-        guid = button.property("guid")
-        indexer_id = button.property("indexerId")
-        if guid in (None, "") or indexer_id is None:
+        guid = self._text_value(button.property("guid"), "")
+        indexer_id = self._int_value(button.property("indexerId"), -1)
+        if not guid or indexer_id < 0:
             return None
         return guid, indexer_id
 
-    def _download_from_button(self, btn):
+    def _download_from_button(self, btn: QPushButton) -> None:
         """Find the button's current row and download that release"""
         try:
             for row in range(self.results_table.rowCount()):
@@ -2797,7 +3064,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Failed to download from button: {e}")
 
-    def download_release(self, row: int):
+    def download_release(self, row: int) -> None:
         """Download a single release via the background queue"""
         item = self._collect_row_download_item(row)
         if not item:
@@ -2812,7 +3079,7 @@ class MainWindow(QMainWindow):
         self.start_download_queue([item])
 
     @safe_slot
-    def download_selected(self):
+    def download_selected(self) -> None:
         """Download all selected releases via the background queue"""
         selected_rows = sorted(
             {idx.row() for idx in self.results_table.selectedIndexes()}
@@ -2820,7 +3087,7 @@ class MainWindow(QMainWindow):
         if not selected_rows:
             self.status_label.setText("No rows selected")
             return
-        items = []
+        items: list[ReleaseDict] = []
         for row in selected_rows:
             item = self._collect_row_download_item(row)
             if item:
@@ -2829,16 +3096,19 @@ class MainWindow(QMainWindow):
             self.start_download_queue(items)
 
     @safe_slot
-    def download_all(self):
+    def download_all(self) -> None:
         """Download all visible (non-hidden, non-downloaded) releases in the table via the background queue"""
-        items = []
+        items: list[ReleaseDict] = []
         for row in range(self.results_table.rowCount()):
             if self.results_table.isRowHidden(row):
                 continue
             # Skip already-downloaded rows using the authoritative GUID set
             btn = self.results_table.cellWidget(row, self.COL_DOWNLOAD)
             if btn:
-                release_key = (btn.property("guid"), btn.property("indexerId"))
+                release_key = (
+                    self._text_value(btn.property("guid"), ""),
+                    self._int_value(btn.property("indexerId"), -1),
+                )
                 if release_key in self._downloaded_release_keys:
                     continue
             item = self._collect_row_download_item(row)
@@ -2851,7 +3121,7 @@ class MainWindow(QMainWindow):
     def select_best_per_group(self):
         """Select the best release per title group (highest seeders, fallback largest size)"""
         self.results_table.clearSelection()
-        groups = {}  # title_key -> (best_row, best_seeders, best_size)
+        groups: dict[str, tuple[int, float, int]] = {}
 
         for row in range(self.results_table.rowCount()):
             if self.results_table.isRowHidden(row):
@@ -2863,8 +3133,16 @@ class MainWindow(QMainWindow):
             title_key = title_item.text()[: self.title_match_chars].lower()
             seeders_item = self.results_table.item(row, self.COL_SEEDERS)
             size_item = self.results_table.item(row, self.COL_SIZE)
-            raw_seeders = seeders_item.data(Qt.UserRole) if seeders_item else -1
-            size = size_item.data(Qt.UserRole) if size_item else 0
+            raw_seeders = (
+                self._int_value(seeders_item.data(Qt.ItemDataRole.UserRole), -1)
+                if seeders_item
+                else -1
+            )
+            size = (
+                self._int_value(size_item.data(Qt.ItemDataRole.UserRole), 0)
+                if size_item
+                else 0
+            )
             # Treat -1 (NZB/unknown) as very high so usenet isn't penalized
             seeders = raw_seeders if raw_seeders >= 0 else float("inf")
 
@@ -2888,15 +3166,18 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Selected best release from {count} title groups")
         self.log(f"Select best per group: {count} groups")
 
-    def start_download_queue(self, items: list[dict], retry_attempt: int = 0):
+    def start_download_queue(
+        self, items: list[ReleaseDict], retry_attempt: int = 0
+    ) -> None:
         """Start background download worker with a list of items, or append to running queue"""
         if self._block_if_shutting_down():
             return
-        if not self.prowlarr:
+        client = self.prowlarr
+        if client is None:
             self.status_label.setText("Prowlarr client not initialized")
             return
 
-        def _is_worker_running(worker) -> bool:
+        def _is_worker_running(worker: DownloadWorker | None) -> bool:
             try:
                 return bool(
                     worker and hasattr(worker, "isRunning") and worker.isRunning()
@@ -2904,7 +3185,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 return False
 
-        def _retry_enqueue(reason: str):
+        def _retry_enqueue(reason: str) -> None:
             next_attempt = retry_attempt + 1
             if next_attempt > self._download_queue_retry_limit:
                 if not _is_worker_running(self.download_worker):
@@ -2929,15 +3210,20 @@ class MainWindow(QMainWindow):
             )
             self.status_label.setText("Queue finishing, retrying enqueue...")
             pending_items = list(items)
-            self._schedule_timer(
-                delay_ms, lambda: self.start_download_queue(pending_items, next_attempt)
-            )
+
+            def retry_pending_queue() -> None:
+                self.start_download_queue(pending_items, next_attempt)
+
+            self._schedule_timer(delay_ms, retry_pending_queue)
 
         # Normalize this request to unique release keys so progress totals stay accurate.
-        deduped_items = []
-        seen_keys = set()
+        deduped_items: list[ReleaseDict] = []
+        seen_keys: set[ReleaseKey] = set()
         for item in items:
-            key = (item.get("guid"), item.get("indexer_id"))
+            key = (
+                self._text_value(item.get("guid", "")),
+                self._int_value(item.get("indexer_id"), -1),
+            )
             if key in seen_keys:
                 continue
             seen_keys.add(key)
@@ -2953,9 +3239,13 @@ class MainWindow(QMainWindow):
             if not callable(add_items):
                 _retry_enqueue("Download worker is not ready to accept new items yet")
                 return
+            queue_add_items = cast(
+                "Callable[[list[ReleaseDict]], list[ReleaseDict] | None]",
+                add_items,
+            )
 
             try:
-                added_items = add_items(items)
+                added_items = queue_add_items(items)
             except Exception as e:
                 logger.warning(f"Download queue add_items failed: {e}")
                 if self._is_deleted_qt_wrapper_error(e) or not _is_worker_running(
@@ -2983,14 +3273,17 @@ class MainWindow(QMainWindow):
 
             # Extend GUID → row mapping for new items
             for item in added_items:
+                item_guid = self._text_value(item["guid"], "")
+                item_indexer_id = self._int_value(item["indexer_id"], -1)
                 for r in range(self.results_table.rowCount()):
                     btn = self.results_table.cellWidget(r, self.COL_DOWNLOAD)
                     if (
                         btn
-                        and btn.property("guid") == item["guid"]
-                        and btn.property("indexerId") == item["indexer_id"]
+                        and self._text_value(btn.property("guid"), "") == item_guid
+                        and self._int_value(btn.property("indexerId"), -1)
+                        == item_indexer_id
                     ):
-                        self._release_key_to_row[(item["guid"], item["indexer_id"])] = r
+                        self._release_key_to_row[(item_guid, item_indexer_id)] = r
                         break
 
             self.log(f"Added {added} item(s) to download queue")
@@ -3016,19 +3309,22 @@ class MainWindow(QMainWindow):
         # Build GUID → row mapping for sort-safe row lookup
         self._release_key_to_row = {}
         for item in items:
+            item_guid = self._text_value(item["guid"], "")
+            item_indexer_id = self._int_value(item["indexer_id"], -1)
             for r in range(self.results_table.rowCount()):
                 btn = self.results_table.cellWidget(r, self.COL_DOWNLOAD)
                 if (
                     btn
-                    and btn.property("guid") == item["guid"]
-                    and btn.property("indexerId") == item["indexer_id"]
+                    and self._text_value(btn.property("guid"), "") == item_guid
+                    and self._int_value(btn.property("indexerId"), -1)
+                    == item_indexer_id
                 ):
-                    self._release_key_to_row[(item["guid"], item["indexer_id"])] = r
+                    self._release_key_to_row[(item_guid, item_indexer_id)] = r
                     break
 
         # Create and start worker
         try:
-            worker = DownloadWorker(self.prowlarr, items)
+            worker = DownloadWorker(client, items)
         except Exception as e:
             logger.error(f"Failed to create download worker: {e}")
             self._clear_download_queue_ownership()
@@ -3037,17 +3333,9 @@ class MainWindow(QMainWindow):
         self.download_worker = worker
         self._download_queue_owner_since = time.monotonic()
         self._track_worker(worker)
-        worker.progress.connect(
-            lambda current, total, title, w=worker: self.on_download_progress(
-                current, total, title, w
-            )
-        )
-        worker.item_downloaded.connect(
-            lambda guid, indexer_id, success, w=worker: self.on_item_downloaded(
-                guid, indexer_id, success, w
-            )
-        )
-        worker.queue_done.connect(lambda w=worker: self.on_download_queue_finished(w))
+        worker.progress.connect(self._download_progress_callback(worker))
+        worker.item_downloaded.connect(self._download_item_callback(worker))
+        worker.queue_done.connect(self._download_done_callback(worker))
         try:
             worker.start()
         except Exception as e:
@@ -3057,7 +3345,13 @@ class MainWindow(QMainWindow):
             return
 
     @safe_slot
-    def on_download_progress(self, current: int, total: int, title: str, worker=None):
+    def on_download_progress(
+        self,
+        current: int,
+        total: int,
+        title: str,
+        worker: DownloadWorker | None = None,
+    ) -> None:
         """Update progress bar and status during batch download"""
         if worker is not None and worker is not self.download_worker:
             return
@@ -3090,8 +3384,12 @@ class MainWindow(QMainWindow):
 
     @safe_slot
     def on_item_downloaded(
-        self, guid: str, indexer_id: int, success: bool, worker=None
-    ):
+        self,
+        guid: str,
+        indexer_id: int,
+        success: bool,
+        worker: DownloadWorker | None = None,
+    ) -> None:
         """Handle individual item download result, identified by (guid, indexer_id)."""
         if worker is not None and worker is not self.download_worker:
             return
@@ -3125,7 +3423,7 @@ class MainWindow(QMainWindow):
             self._write_download_history(title, indexer, False)
 
     @safe_slot
-    def on_download_queue_finished(self, worker=None):
+    def on_download_queue_finished(self, worker: DownloadWorker | None = None) -> None:
         """Handle download queue completion"""
         if worker is not None and worker is not self.download_worker:
             return
@@ -3293,7 +3591,7 @@ class MainWindow(QMainWindow):
         ".m2ts",
     }
 
-    def _find_video_file(self, everything_results: list) -> str | None:
+    def _find_video_file(self, everything_results: EverythingMatches) -> str | None:
         """Find the first video file path from Everything search results"""
         logger.debug(f"_find_video_file: checking {len(everything_results)} results")
         for i, item in enumerate(everything_results):
@@ -3323,7 +3621,7 @@ class MainWindow(QMainWindow):
         self.download_release(row)
 
     @safe_slot
-    def _show_header_context_menu(self, pos):
+    def _show_header_context_menu(self, pos: QPoint) -> None:
         """Show right-click context menu on table header to toggle column visibility"""
         menu = QMenu(self)
         for col in range(self.COL_COUNT):
@@ -3333,13 +3631,15 @@ class MainWindow(QMainWindow):
             action = menu.addAction(name)
             action.setCheckable(True)
             action.setChecked(not self.results_table.isColumnHidden(col))
-            action.toggled.connect(
-                lambda checked, c=col: self._toggle_column_visibility(c, not checked)
-            )
+
+            def toggle_column(checked: bool, c: int = col) -> None:
+                self._toggle_column_visibility(c, not checked)
+
+            action.toggled.connect(toggle_column)
         menu.exec(self.results_table.horizontalHeader().mapToGlobal(pos))
 
     @safe_slot
-    def _show_context_menu(self, pos):
+    def _show_context_menu(self, pos: QPoint) -> None:
         """Show right-click context menu on results table"""
         row = self.results_table.rowAt(pos.y())
         if row < 0:
@@ -3349,17 +3649,29 @@ class MainWindow(QMainWindow):
 
         # Download
         download_action = menu.addAction("Download (Space)")
-        download_action.triggered.connect(lambda: self.download_release(row))
+
+        def trigger_download() -> None:
+            self.download_release(row)
+
+        download_action.triggered.connect(trigger_download)
 
         menu.addSeparator()
 
         # Copy title
         copy_action = menu.addAction("Copy Title (C)")
-        copy_action.triggered.connect(lambda: self._context_copy_title(row))
+
+        def trigger_copy_title() -> None:
+            self._context_copy_title(row)
+
+        copy_action.triggered.connect(trigger_copy_title)
 
         # Web search
         web_action = menu.addAction("Web Search (G)")
-        web_action.triggered.connect(lambda: self._context_web_search(row))
+
+        def trigger_web_search() -> None:
+            self._context_web_search(row)
+
+        web_action.triggered.connect(trigger_web_search)
 
         # Play video
         play_action = menu.addAction("Play Video (P)")
@@ -3377,6 +3689,7 @@ class MainWindow(QMainWindow):
 
         # Everything search
         if self.everything:
+            everything = self.everything
             everything_action = menu.addAction("Search Everything (S)")
             title_item = self.results_table.item(row, self.COL_TITLE)
             title = title_item.text() if title_item else None
@@ -3385,20 +3698,30 @@ class MainWindow(QMainWindow):
             def _search_everything():
                 try:
                     if title:
-                        self.everything.launch_search(title)
+                        everything.launch_search(title)
                 except Exception as e:
                     logger.error(f"Failed to launch Everything: {e}")
 
             everything_action.triggered.connect(_search_everything)
 
         # Custom commands
-        for key, label in [(Qt.Key_F2, "F2"), (Qt.Key_F3, "F3"), (Qt.Key_F4, "F4")]:
+        for key, label in [
+            (Qt.Key.Key_F2, "F2"),
+            (Qt.Key.Key_F3, "F3"),
+            (Qt.Key.Key_F4, "F4"),
+        ]:
             cmd = self.custom_commands.get(key, "")
             if cmd:
                 action = menu.addAction(f"Custom Command {label}")
-                action.triggered.connect(
-                    lambda checked=False, k=key, c=cmd: self._run_custom_command(k, c)
-                )
+
+                def trigger_custom_command(
+                    _checked: bool = False,
+                    k: Qt.Key = key,
+                    c: str = cmd,
+                ) -> None:
+                    self._run_custom_command(k, c)
+
+                action.triggered.connect(trigger_custom_command)
 
         menu.exec(self.results_table.viewport().mapToGlobal(pos))
 
@@ -3476,18 +3799,22 @@ class MainWindow(QMainWindow):
 
         self.status_label.setText(f"Not found: '{self.find_input.text()}'")
 
-    def eventFilter(self, obj, event):
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         """Handle Esc key in find bar to close it"""
-        if obj == self.find_input and event.type() == event.Type.KeyPress:
-            if event.key() == Qt.Key_Escape:
+        if obj == self.find_input and event.type() == QEvent.Type.KeyPress:
+            key_event = cast("QKeyEvent", event)
+            if key_event.key() == Qt.Key.Key_Escape:
                 self._close_find_bar()
                 return True
-            if event.key() == Qt.Key_Return and event.modifiers() & Qt.ShiftModifier:
+            if (
+                key_event.key() == Qt.Key.Key_Return
+                and key_event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            ):
                 self._find_prev()
                 return True
         return super().eventFilter(obj, event)
 
-    def table_key_press(self, event):
+    def table_key_press(self, event: QKeyEvent) -> None:
         """
         Handle keyboard shortcuts in results table
         Space: Download current row and move to next
@@ -3496,7 +3823,10 @@ class MainWindow(QMainWindow):
         G: Open web search with release title
         P: Play video file found by Everything
         """
-        if event.key() == Qt.Key_Space:
+        key = Qt.Key(event.key())
+        modifiers = event.modifiers()
+
+        if key == Qt.Key.Key_Space:
             # Download current release and move to next visible row
             current_row = self.results_table.currentRow()
             if current_row >= 0:
@@ -3512,7 +3842,7 @@ class MainWindow(QMainWindow):
                 event.accept()
                 return
 
-        elif event.key() == Qt.Key_S:
+        elif key == Qt.Key.Key_S:
             # Launch Everything.exe with search
             if self.everything:
                 title = self.get_current_row_title()
@@ -3526,7 +3856,7 @@ class MainWindow(QMainWindow):
                 event.accept()
                 return
 
-        elif event.key() == Qt.Key_C:
+        elif key == Qt.Key.Key_C:
             # Copy title to clipboard
             title = self.get_current_row_title()
             if title:
@@ -3537,7 +3867,7 @@ class MainWindow(QMainWindow):
                 event.accept()
                 return
 
-        elif event.key() == Qt.Key_G:
+        elif key == Qt.Key.Key_G:
             # Open web search
             title = self.get_current_row_title()
             if title:
@@ -3547,7 +3877,7 @@ class MainWindow(QMainWindow):
                 event.accept()
                 return
 
-        elif event.key() == Qt.Key_P:
+        elif key == Qt.Key.Key_P:
             # Play video file found by Everything
             current_row = self.results_table.currentRow()
             if current_row >= 0:
@@ -3565,21 +3895,23 @@ class MainWindow(QMainWindow):
                 event.accept()
                 return
 
-        elif event.key() in self.custom_commands:
-            cmd = self.custom_commands[event.key()]
+        elif key in self.custom_commands:
+            cmd = self.custom_commands[key]
             if cmd:
-                self._run_custom_command(event.key(), cmd)
+                self._run_custom_command(key, cmd)
             else:
-                key_name = {Qt.Key_F2: "F2", Qt.Key_F3: "F3", Qt.Key_F4: "F4"}.get(
-                    event.key(), "?"
-                )
+                key_name = {
+                    Qt.Key.Key_F2: "F2",
+                    Qt.Key.Key_F3: "F3",
+                    Qt.Key.Key_F4: "F4",
+                }.get(key, "?")
                 self.status_label.setText(
                     f"No custom command configured for {key_name} (set custom_command_{key_name} in config)"
                 )
             event.accept()
             return
 
-        elif event.key() == Qt.Key_A and event.modifiers() & Qt.ControlModifier:
+        elif key == Qt.Key.Key_A and modifiers & Qt.KeyboardModifier.ControlModifier:
             # Select all visible (non-hidden) rows
             selection_model = self.results_table.selectionModel()
             selection = QItemSelection()
@@ -3598,9 +3930,9 @@ class MainWindow(QMainWindow):
             event.accept()
             return
 
-        elif event.key() == Qt.Key_Tab:
+        elif key == Qt.Key.Key_Tab:
             # Jump to next title group
-            if event.modifiers() & Qt.ShiftModifier:
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
                 self._jump_title_group(forward=False)
             else:
                 self._jump_title_group(forward=True)
@@ -3640,7 +3972,7 @@ class MainWindow(QMainWindow):
                         return
             row += step
 
-    def _run_custom_command(self, key, cmd_template: str):
+    def _run_custom_command(self, key: Qt.Key, cmd_template: str) -> None:
         """Run a custom command with {title} and {video} placeholders"""
         current_row = self.results_table.currentRow()
         if current_row < 0:
@@ -3649,7 +3981,9 @@ class MainWindow(QMainWindow):
 
         title = self.get_current_row_title() or ""
         video = self._get_video_path_for_row(current_row) or ""
-        key_name = {Qt.Key_F2: "F2", Qt.Key_F3: "F3", Qt.Key_F4: "F4"}.get(key, "?")
+        key_name = {Qt.Key.Key_F2: "F2", Qt.Key.Key_F3: "F3", Qt.Key.Key_F4: "F4"}.get(
+            key, "?"
+        )
 
         # Build argument list safely (no shell=True)
         import shlex
@@ -3720,51 +4054,46 @@ class MainWindow(QMainWindow):
             try:
                 if timer in self._pending_timers:
                     self._pending_timers.remove(timer)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"Failed to untrack close retry timer: {exc}")
         self._close_retry_pending = False
         self._close_retry_timer = None
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent) -> None:
         """
         Handle application close event
         Save preferences before exiting
         """
 
-        def _request_interrupt(worker, name: str):
+        def _request_interrupt(worker: WorkerThread | None, name: str) -> None:
             if not worker:
                 return
             try:
-                if hasattr(worker, "requestInterruption"):
-                    worker.requestInterruption()
+                worker.requestInterruption()
             except Exception as e:
                 logger.debug(f"Failed to request interruption for {name}: {e}")
 
-        def _is_running(worker) -> bool:
+        def _is_running(worker: WorkerThread | None) -> bool:
             try:
-                return bool(
-                    worker and hasattr(worker, "isRunning") and worker.isRunning()
-                )
+                return bool(worker and worker.isRunning())
             except Exception:
                 return False
 
-        def _force_stop(worker, name: str):
+        def _force_stop(worker: WorkerThread | None, name: str) -> None:
             if not worker:
                 return
             # Last-resort stop path: try cooperative cancel first, then terminate.
             _request_interrupt(worker, name)
             try:
-                if hasattr(worker, "terminate"):
-                    worker.terminate()
+                worker.terminate()
             except Exception as e:
                 logger.debug(f"Failed to terminate {name}: {e}")
             try:
-                if hasattr(worker, "wait"):
-                    worker.wait(250)
+                worker.wait(250)
             except Exception as e:
                 logger.debug(f"Failed forced wait for {name}: {e}")
 
-        tracked_named_workers = [
+        tracked_named_workers: list[tuple[str, WorkerThread | None]] = [
             ("InitWorker", self.init_worker),
             ("SearchWorker", self.current_worker),
             ("EverythingCheckWorker", self.everything_check_worker),
@@ -3790,7 +4119,7 @@ class MainWindow(QMainWindow):
             self._shutdown_force_prompted = False
             self._shutdown_interrupted_worker_ids.clear()
 
-        def _interrupt_once_if_running(worker, name: str):
+        def _interrupt_once_if_running(worker: WorkerThread | None, name: str) -> None:
             if not _is_running(worker):
                 return
             worker_id = id(worker)
@@ -3805,15 +4134,15 @@ class MainWindow(QMainWindow):
         for worker in self._all_workers:
             _interrupt_once_if_running(worker, type(worker).__name__)
 
-        seen_workers = set()
-        still_running = []
+        seen_workers: set[int] = set()
+        still_running: list[tuple[str, WorkerThread]] = []
         wait_ms = 75 if first_shutdown_attempt else 0
 
         for name, worker in tracked_named_workers:
             if not worker:
                 continue
             seen_workers.add(id(worker))
-            if wait_ms > 0 and hasattr(worker, "wait"):
+            if wait_ms > 0:
                 try:
                     worker.wait(wait_ms)
                 except Exception as e:
@@ -3825,7 +4154,7 @@ class MainWindow(QMainWindow):
         for worker in self._all_workers:
             if not worker or id(worker) in seen_workers:
                 continue
-            if wait_ms > 0 and hasattr(worker, "wait"):
+            if wait_ms > 0:
                 try:
                     worker.wait(wait_ms)
                 except Exception as e:
@@ -3843,8 +4172,8 @@ class MainWindow(QMainWindow):
                 self.status_label.setText(wait_msg)
 
             if force_armed:
-                unresolved = []
-                force_seen = set()
+                unresolved: list[str] = []
+                force_seen: set[int] = set()
                 for name, worker in still_running:
                     worker_id = id(worker)
                     if worker_id in force_seen:

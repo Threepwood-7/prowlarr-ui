@@ -24,7 +24,7 @@ class EverythingCheckWorker(QThread):
     def __init__(
         self,
         everything: EverythingSearch,
-        results: list[dict],
+        results: list[dict[str, object]],
         title_match_chars: int,
         everything_search_chars: int,
         batch_size: int = 10,
@@ -37,11 +37,11 @@ class EverythingCheckWorker(QThread):
         self.everything_search_chars = everything_search_chars
         self.batch_size = batch_size
 
-    def run(self):
+    def run(self) -> None:
         """Check each result in Everything, emit in batches."""
         try:
             total = len(self.results)
-            batch = []
+            batch: list[tuple[int, list[tuple[str, int]]]] = []
             interrupted = False
             for row, result in enumerate(self.results):
                 if self.isInterruptionRequested():
@@ -51,7 +51,7 @@ class EverythingCheckWorker(QThread):
                     )
                     break
 
-                title = result.get("title", "Unknown")
+                title = str(result.get("title", "Unknown") or "Unknown")
 
                 # Search with wildcard pattern
                 # Quote the prefix to prevent Everything interpreting |, !, <, >, () as operators

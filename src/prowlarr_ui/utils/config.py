@@ -5,11 +5,9 @@ from __future__ import annotations
 import copy
 import logging
 import os
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, cast
 
-from threep_commons.config_helpers import (
-    coerce_bool as _shared_coerce_bool,
-)
 from threep_commons.config_helpers import (
     coerce_value as _shared_coerce_value,
 )
@@ -171,6 +169,7 @@ def _new_config_store() -> QSettingsValueStore:
 
 
 def config_store_file_path() -> str:
+    """Return the canonical on-disk path for the shared settings store."""
     return _new_config_store().file_name()
 
 
@@ -188,12 +187,16 @@ def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str
     return _shared_deep_merge_dicts(base, overlay)
 
 
-def _coerce_bool(value: Any, default: bool) -> bool:
-    return _shared_coerce_bool(value, default)
-
-
 def _coerce_value(value: Any, expected_type: type, default: Any) -> Any:
     return _shared_coerce_value(value, expected_type, default)
+
+
+def _as_object_dict(value: Any) -> dict[str, Any]:
+    """Normalize one object to a plain string-key dict when possible."""
+    if not isinstance(value, Mapping):
+        return {}
+    mapping = cast("Mapping[object, Any]", value)
+    return {str(key): entry for key, entry in mapping.items()}
 
 
 def _apply_secret_env_overrides(config: dict[str, Any]) -> None:
@@ -228,9 +231,7 @@ def load_config() -> dict[str, Any]:
 
 def save_config(config: dict[str, Any]) -> None:
     """Persist known config keys to the settings store and sync immediately."""
-    merged = _deep_merge_dicts(
-        get_default_config(), config if isinstance(config, dict) else {}
-    )
+    merged = _deep_merge_dicts(get_default_config(), config)
     settings = _new_config_store()
 
     for key, expected_type, default in CONFIG_SCHEMA:
@@ -240,7 +241,7 @@ def save_config(config: dict[str, Any]) -> None:
             if not isinstance(current, dict):
                 current = default
                 break
-            current = current.get(part, default)
+            current = _as_object_dict(current).get(part, default)
         settings.set_value(key, _coerce_value(current, expected_type, default))
 
     settings.sync()
@@ -249,11 +250,9 @@ def save_config(config: dict[str, Any]) -> None:
 def get_missing_required_config(config: dict[str, Any]) -> list[str]:
     """Return required-field validation failures for startup wizard gating."""
     missing: list[str] = []
-    prowlarr = config.get("prowlarr", {}) if isinstance(config, dict) else {}
-    host = str(prowlarr.get("host", "") if isinstance(prowlarr, dict) else "").strip()
-    api_key = str(
-        prowlarr.get("api_key", "") if isinstance(prowlarr, dict) else ""
-    ).strip()
+    prowlarr = _as_object_dict(config.get("prowlarr", {}))
+    host = str(prowlarr.get("host", "") or "").strip()
+    api_key = str(prowlarr.get("api_key", "") or "").strip()
     if not host:
         missing.append("prowlarr.host is required")
     if not api_key or api_key == "YOUR_API_KEY_HERE":
@@ -265,12 +264,12 @@ def validate_config(config: dict[str, Any]) -> list[str]:
     """Validate config values and return warnings. Clamps numeric ranges."""
     warnings: list[str] = []
 
-    prowlarr = config.get("prowlarr", {})
-    api_key = prowlarr.get("api_key", "") if isinstance(prowlarr, dict) else ""
+    prowlarr = _as_object_dict(config.get("prowlarr", {}))
+    api_key = prowlarr.get("api_key", "")
     if not api_key or api_key == "YOUR_API_KEY_HERE":
         warnings.append("Prowlarr API key is not set")
 
-    host = prowlarr.get("host", "") if isinstance(prowlarr, dict) else ""
+    host = prowlarr.get("host", "")
     if host and not (
         str(host).startswith("http://") or str(host).startswith("https://")
     ):
@@ -278,8 +277,8 @@ def validate_config(config: dict[str, Any]) -> list[str]:
             f"Prowlarr host should start with http:// or https:// (got: {host})"
         )
 
-    settings = config.get("settings", {})
-    if not isinstance(settings, dict):
+    settings = _as_object_dict(config.get("settings", {}))
+    if not settings:
         config["settings"] = {}
         settings = config["settings"]
 

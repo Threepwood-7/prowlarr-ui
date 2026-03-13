@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, cast
 
 from PySide6.QtWidgets import (
     QDialog,
@@ -18,19 +19,45 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from prowlarr_ui.api.prowlarr_client import ProwlarrClient
-from prowlarr_ui.utils.config import get_default_config
+from ..api.prowlarr_client import ProwlarrClient
+from ..utils.config import get_default_config
 
 
 class ProwlarrSetupWizardDialog(QDialog):
+    """Modal wizard used to collect the minimum runtime connection settings."""
+
+    @staticmethod
+    def _object_dict(value: object) -> dict[str, object]:
+        """Normalize one object to a plain string-key dict when possible."""
+        if not isinstance(value, Mapping):
+            return {}
+        mapping = cast("Mapping[object, object]", value)
+        return {str(key): entry for key, entry in mapping.items()}
+
+    @staticmethod
+    def _int_value(value: object, default: int) -> int:
+        """Coerce one dialog setting value to int with a safe fallback."""
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return default
+        return default
+
     def __init__(self, initial: dict[str, Any], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Prowlarr UI Setup Wizard")
         self.resize(680, 420)
 
         defaults = get_default_config()
-        prowlarr = initial.get("prowlarr", {}) if isinstance(initial, dict) else {}
-        settings = initial.get("settings", {}) if isinstance(initial, dict) else {}
+        prowlarr = self._object_dict(initial.get("prowlarr", {}))
+        settings = self._object_dict(initial.get("settings", {}))
 
         root = QVBoxLayout(self)
         root.addWidget(
@@ -67,28 +94,33 @@ class ProwlarrSetupWizardDialog(QDialog):
         self.spn_page_size = QSpinBox()
         self.spn_page_size.setRange(1, 10000)
         self.spn_page_size.setValue(
-            int(
+            self._int_value(
                 settings.get(
                     "prowlarr_page_size", defaults["settings"]["prowlarr_page_size"]
-                )
+                ),
+                int(defaults["settings"]["prowlarr_page_size"]),
             )
         )
 
         self.spn_everything_results = QSpinBox()
         self.spn_everything_results.setRange(1, 100)
         self.spn_everything_results.setValue(
-            int(
+            self._int_value(
                 settings.get(
                     "everything_max_results",
                     defaults["settings"]["everything_max_results"],
-                )
+                ),
+                int(defaults["settings"]["everything_max_results"]),
             )
         )
 
         self.spn_api_timeout = QSpinBox()
         self.spn_api_timeout.setRange(1, 300)
         self.spn_api_timeout.setValue(
-            int(settings.get("api_timeout", defaults["settings"]["api_timeout"]))
+            self._int_value(
+                settings.get("api_timeout", defaults["settings"]["api_timeout"]),
+                int(defaults["settings"]["api_timeout"]),
+            )
         )
 
         form.addRow("Prowlarr Host", self.txt_host)
@@ -200,6 +232,7 @@ class ProwlarrSetupWizardDialog(QDialog):
 def run_setup_wizard(
     initial: dict[str, Any], parent: QWidget | None = None
 ) -> dict[str, Any] | None:
+    """Run the setup wizard and return the accepted configuration payload."""
     dialog = ProwlarrSetupWizardDialog(initial, parent=parent)
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None

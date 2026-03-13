@@ -9,6 +9,8 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+ReleaseDict = dict[str, object]
+
 
 class ProwlarrClient:
     """
@@ -48,7 +50,7 @@ class ProwlarrClient:
                 return False
             time.sleep(min(0.1, remaining))
 
-    def _request_timeout(self, _cancellable: bool = False):
+    def _request_timeout(self) -> float:
         """
         Build a requests timeout value (seconds).
         Cancellable worker requests use the same timeout so long-running searches can complete.
@@ -90,7 +92,7 @@ class ProwlarrClient:
         for attempt in range(1, max_attempts + 1):
             if should_cancel and should_cancel():
                 raise RuntimeError("Prowlarr request cancelled")
-            timeout_value = self._request_timeout(cancellable=bool(should_cancel))
+            timeout_value = self._request_timeout()
             try:
                 if method == "GET":
                     response = http.get(
@@ -159,15 +161,15 @@ class ProwlarrClient:
 
     def get_indexers(
         self, should_cancel: Callable[[], bool] | None = None
-    ) -> list[dict]:
+    ) -> list[ReleaseDict]:
         """Fetch all configured indexers"""
         try:
-            return self._api_request("indexer", should_cancel=should_cancel)
+            return list(self._api_request("indexer", should_cancel=should_cancel))
         except Exception as e:
             logger.error(f"Failed to get indexers: {e}")
             raise
 
-    def get_categories(self) -> list[dict]:
+    def get_categories(self) -> list[ReleaseDict]:
         """
         Get predefined Prowlarr categories
         These are standard across all indexers
@@ -191,13 +193,13 @@ class ProwlarrClient:
         offset: int = 0,
         limit: int = 1000,
         should_cancel: Callable[[], bool] | None = None,
-    ) -> list[dict]:
+    ) -> list[ReleaseDict]:
         """
         Search across indexers
         Returns list of release dictionaries
         """
         try:
-            params = {
+            params: dict[str, str | int | list[int]] = {
                 "type": "search",
                 "query": query,
                 "offset": offset,

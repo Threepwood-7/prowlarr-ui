@@ -38,7 +38,7 @@ class SearchWorker(QThread):
         self.offset = offset
         self.limit = limit
 
-    def run(self):
+    def run(self) -> None:
         """Execute search in background thread"""
         try:
             # Allow shutdown path to cancel before any network work begins.
@@ -61,9 +61,6 @@ class SearchWorker(QThread):
                 self.limit,
                 should_cancel=self.isInterruptionRequested,
             )
-
-            if results is None:
-                results = []
 
             # Avoid emitting stale completion updates if shutdown requested.
             if self.isInterruptionRequested():

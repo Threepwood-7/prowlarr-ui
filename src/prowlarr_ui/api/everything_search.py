@@ -244,7 +244,7 @@ class EverythingSearch:
                 # Get result count
                 count = self.dll.Everything_GetNumResults()
 
-                results = []
+                results: list[tuple[str, int]] = []
                 for i in range(min(count, everything_max_results)):
                     # Get filename
                     filename = self.dll.Everything_GetResultFileNameW(i)
@@ -254,9 +254,9 @@ class EverythingSearch:
 
                     # Combine to full name
                     if path and filename:
-                        full_name = os.path.join(path, filename)
+                        full_name = os.path.join(str(path), str(filename))
                     elif filename:
-                        full_name = filename
+                        full_name = str(filename)
                     else:
                         continue
 
@@ -299,7 +299,7 @@ class EverythingSearch:
             if response.status_code == 200:
                 data = response.json()
 
-                results = []
+                results: list[tuple[str, int]] = []
                 for item in data.get("results", []):
                     # Get name
                     name = item.get("name", "")
@@ -307,7 +307,7 @@ class EverythingSearch:
                         continue
 
                     # Get path if available
-                    path = item.get("path", "")
+                    path = str(item.get("path", "") or "")
 
                     # Combine to full name
                     full_name = os.path.join(path, name) if path else name

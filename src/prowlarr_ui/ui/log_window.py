@@ -34,8 +34,8 @@ class LogWindow(QWidget):
     Can be toggled from main menu
     """
 
-    def __init__(self, parent=None):
-        super().__init__(None, Qt.Window)  # No parent = own taskbar icon
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(None, Qt.WindowType.Window)  # No parent = own taskbar icon
         self.setWindowTitle("Log Viewer")
         self.setWindowIcon(self._create_notebook_icon())
 
@@ -103,10 +103,16 @@ class LogWindow(QWidget):
         excess = doc.blockCount() - MAX_LOG_LINES
         if excess > 0:
             cursor = QTextCursor(doc)
-            cursor.movePosition(QTextCursor.Start)
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
             for _ in range(excess):
-                cursor.movePosition(QTextCursor.Down, QTextCursor.KeepAnchor)
-            cursor.movePosition(QTextCursor.StartOfLine, QTextCursor.KeepAnchor)
+                cursor.movePosition(
+                    QTextCursor.MoveOperation.Down,
+                    QTextCursor.MoveMode.KeepAnchor,
+                )
+            cursor.movePosition(
+                QTextCursor.MoveOperation.StartOfLine,
+                QTextCursor.MoveMode.KeepAnchor,
+            )
             cursor.removeSelectedText()
             cursor.deleteChar()  # remove trailing newline
 
@@ -152,10 +158,14 @@ class LogWindow(QWidget):
     def toggle_stay_on_top(self):
         """Toggle window always-on-top flag"""
         try:
-            if self.windowFlags() & Qt.WindowStaysOnTopHint:
-                self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
+            if self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint:
+                self.setWindowFlags(
+                    self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint
+                )
             else:
-                self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+                self.setWindowFlags(
+                    self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint
+                )
             self.show()  # Required after changing window flags
         except Exception as e:
             logger.error(f"Failed to toggle stay on top: {e}")
@@ -165,9 +175,9 @@ class LogWindow(QWidget):
         """Draw a simple notebook icon (page with lines and spiral binding)"""
         size = 64
         pix = QPixmap(size, size)
-        pix.fill(Qt.transparent)
+        pix.fill(Qt.GlobalColor.transparent)
         p = QPainter(pix)
-        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         # Page background
         p.setPen(QPen(QColor(80, 80, 80), 2))
         p.setBrush(QColor(255, 255, 240))
@@ -177,7 +187,7 @@ class LogWindow(QWidget):
         for y in range(18, 54, 8):
             p.drawLine(18, y, 54, y)
         # Spiral binding dots on left edge
-        p.setPen(Qt.NoPen)
+        p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(100, 100, 100))
         for y in range(12, 56, 10):
             p.drawEllipse(7, y, 6, 6)
