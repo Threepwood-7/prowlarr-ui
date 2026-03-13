@@ -57,28 +57,26 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStatusBar,
     QTableWidget,
-    QTableWidgetItem,
     QTextBrowser,
     QTreeView,
     QVBoxLayout,
     QWidget,
 )
 from threep_commons.desktop import open_path_in_default_app
-from threep_commons.formatters import format_age, format_size
+from threep_commons.formatters import format_size
 from threep_commons.logging import resolve_log_path, setup_logging_from_identity
 from threep_commons.paths import configure_qsettings
 from threep_commons.qt.slots import safe_slot
-from threep_commons.quality import parse_quality
 from threep_commons.settings import QSettingsValueStore
 
 from .api.everything_search import EverythingSearch
 from .api.prowlarr_client import ProwlarrClient
+from .app_results_rendering import render_results_table
 from .app_ui_layout import build_center_panel, build_left_panel, setup_main_window_ui
 from .constants import APP_IDENTITY, SETTINGS_APP_NAME
 from .ui.help_text import HELP_HTML
 from .ui.log_window import LogWindow
 from .ui.setup_wizard import run_setup_wizard
-from .ui.widgets import NumericTableWidgetItem
 from .utils.config import (
     config_store_file_path,
     ensure_config_exists,
@@ -425,6 +423,26 @@ class MainWindow(QMainWindow):
     def pref_key(self, name: str) -> str:
         """Expose the preference-key helper to layout collaborators."""
         return self._pref_key(name)
+
+    def int_value(self, value: object, default: int) -> int:
+        """Expose numeric coercion to extracted collaborators."""
+        return self._int_value(value, default)
+
+    def text_value(self, value: object, default: str = "") -> str:
+        """Expose text coercion to extracted collaborators."""
+        return self._text_value(value, default)
+
+    def download_from_button(self, button: QPushButton) -> None:
+        """Expose button-driven download dispatch to extracted collaborators."""
+        self._download_from_button(button)
+
+    def is_release_downloaded(self, guid: str, indexer_id: int) -> bool:
+        """Expose release-download state for extracted row renderers."""
+        return (
+            bool(guid)
+            and indexer_id >= 0
+            and (guid, indexer_id) in self._downloaded_release_keys
+        )
 
     def setup_ui(self) -> None:
         """Build the main window UI using the extracted layout helpers."""
@@ -2987,136 +3005,8 @@ class MainWindow(QMainWindow):
         self.status_label.setText("View reset: all columns visible, default widths")
 
     def display_results(self, results: list[ReleaseDict]) -> None:
-        """
-        Display search results in table
-        Groups by title (configurable chars) with 24 alternating colors
-        """
-        # Warn user about large result sets that may cause UI slowdown
-        if len(results) > 5000:
-            self.log(
-                f"WARNING: Displaying {len(results)} results may cause UI "
-                "slowdown. Consider using filters."
-            )
-            self.status_label.setText(
-                f"Loading {len(results)} results (may be slow)..."
-            )
-
-        # Get 24 color palette
-        colors = self.get_palette_colors()
-
-        # Track colors for title groups
-        title_colors: dict[str, QColor] = {}
-        color_index = 0
-
-        for result in results:
-            row = self.results_table.rowCount()
-            self.results_table.insertRow(row)
-
-            # Age column (sortable by numeric value, age is in days)
-            age = self._int_value(result.get("age", 0), 0)
-            age_str = format_age(age)
-            age_item = NumericTableWidgetItem(age_str)
-            age_item.setData(Qt.ItemDataRole.UserRole, age)
-            self.results_table.setItem(row, self.COL_AGE, age_item)
-
-            # Title column
-            title = self._text_value(result.get("title", "Unknown"), "Unknown")
-            title_key = title[: self.title_match_chars].lower()
-
-            # Assign color to this title group from 24-color palette
-            if title_key not in title_colors:
-                title_colors[title_key] = colors[color_index % 24]
-                color_index += 1
-
-            title_item = QTableWidgetItem(title)
-            self.results_table.setItem(row, self.COL_TITLE, title_item)
-
-            # Quality column (parsed from title)
-            quality = parse_quality(title)
-            quality_item = QTableWidgetItem(quality)
-            self.results_table.setItem(row, self.COL_QUALITY, quality_item)
-
-            # Size column (sortable by numeric value)
-            size = self._int_value(result.get("size", 0), 0)
-            size_str = format_size(size)
-            size_item = NumericTableWidgetItem(size_str)
-            size_item.setData(Qt.ItemDataRole.UserRole, size)
-            self.results_table.setItem(row, self.COL_SIZE, size_item)
-
-            # Seeders column
-            seeders_value = result.get("seeders")
-            seeders = (
-                None if seeders_value is None else self._int_value(seeders_value, -1)
-            )
-            seeders_item = NumericTableWidgetItem(
-                str(seeders) if seeders is not None else ""
-            )
-            seeders_item.setData(
-                Qt.ItemDataRole.UserRole,
-                seeders if seeders is not None else -1,
-            )
-            self.results_table.setItem(row, self.COL_SEEDERS, seeders_item)
-
-            # Leechers column
-            leechers_value = result.get("leechers")
-            leechers = (
-                None if leechers_value is None else self._int_value(leechers_value, -1)
-            )
-            leechers_item = NumericTableWidgetItem(
-                str(leechers) if leechers is not None else ""
-            )
-            leechers_item.setData(
-                Qt.ItemDataRole.UserRole,
-                leechers if leechers is not None else -1,
-            )
-            self.results_table.setItem(row, self.COL_LEECHERS, leechers_item)
-
-            # Grabs column
-            grabs_value = result.get("grabs")
-            grabs = None if grabs_value is None else self._int_value(grabs_value, -1)
-            grabs_item = NumericTableWidgetItem(str(grabs) if grabs is not None else "")
-            grabs_item.setData(
-                Qt.ItemDataRole.UserRole,
-                grabs if grabs is not None else -1,
-            )
-            self.results_table.setItem(row, self.COL_GRABS, grabs_item)
-
-            # Indexer column
-            indexer = self._text_value(result.get("indexer", "Unknown"), "Unknown")
-            indexer_item = QTableWidgetItem(indexer)
-            self.results_table.setItem(row, self.COL_INDEXER, indexer_item)
-
-            # Download button
-            download_btn = QPushButton("Download")
-            guid = self._text_value(result.get("guid", ""))
-            indexer_id = self._int_value(result.get("indexerId", -1), -1)
-            download_btn.setProperty("guid", guid)
-            download_btn.setProperty("indexerId", indexer_id)
-            download_btn.setProperty("title", title)
-
-            def click_download(
-                _checked: bool = False, btn: QPushButton = download_btn
-            ) -> None:
-                self._download_from_button(btn)
-
-            download_btn.clicked.connect(click_download)
-            self.results_table.setCellWidget(row, self.COL_DOWNLOAD, download_btn)
-
-            # Apply background color to row (same color for same title group)
-            # Re-apply downloaded state (dark red text) if the GUID was
-            # previously downloaded.
-            release_key = (guid, indexer_id)
-            is_downloaded = (
-                bool(guid)
-                and indexer_id >= 0
-                and release_key in self._downloaded_release_keys
-            )
-            for col in range(self.COL_DOWNLOAD):  # Don't color button column
-                item = self.results_table.item(row, col)
-                if item:
-                    item.setBackground(title_colors[title_key])
-                    if is_downloaded:
-                        item.setForeground(QColor(139, 0, 0))
+        """Display search results in the extracted table renderer."""
+        render_results_table(self, results)
 
     def _collect_row_download_item(self, row: int) -> ReleaseDict | None:
         """Extract download info from a table row"""
