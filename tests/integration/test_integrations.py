@@ -65,8 +65,8 @@ def print_test(name, status, details=""):
         print(f"    {Colors.YELLOW}{details}{Colors.RESET}")
 
 
-def test_prowlarr_api(config):
-    """Test Prowlarr using direct API method"""
+def _run_prowlarr_api_check(config):
+    """Run the direct Prowlarr API integration check."""
     print_header("PROWLARR - Direct API Method")
 
     prowlarr_config = config.get("prowlarr", {})
@@ -138,8 +138,14 @@ def test_prowlarr_api(config):
     return True
 
 
-def test_everything_sdk():
-    """Test Everything using SDK method"""
+def test_prowlarr_api(config):
+    """Test Prowlarr using direct API method."""
+    if not _run_prowlarr_api_check(config):
+        pytest.skip("Prowlarr integration is not available in this environment")
+
+
+def _run_everything_sdk_check():
+    """Run the Everything SDK integration check."""
     print_header("EVERYTHING - SDK Method (DLL)")
 
     try:
@@ -176,8 +182,14 @@ def test_everything_sdk():
     return True
 
 
-def test_everything_http():
-    """Test Everything using HTTP method"""
+def test_everything_sdk():
+    """Test Everything using SDK method."""
+    if not _run_everything_sdk_check():
+        pytest.skip("Everything SDK integration is not available in this environment")
+
+
+def _run_everything_http_check():
+    """Run the Everything HTTP integration check."""
     print_header("EVERYTHING - HTTP Method")
 
     try:
@@ -221,6 +233,12 @@ def test_everything_http():
     return True
 
 
+def test_everything_http():
+    """Test Everything using HTTP method."""
+    if not _run_everything_http_check():
+        pytest.skip("Everything HTTP integration is not available in this environment")
+
+
 def main():
     """Run all integration tests"""
     if not COLORS_AVAILABLE:
@@ -245,9 +263,9 @@ def main():
 
     # Run all tests
     results = {
-        "Prowlarr API": test_prowlarr_api(config),
-        "Everything SDK": test_everything_sdk(),
-        "Everything HTTP": test_everything_http(),
+        "Prowlarr API": _run_prowlarr_api_check(config),
+        "Everything SDK": _run_everything_sdk_check(),
+        "Everything HTTP": _run_everything_http_check(),
     }
 
     # Summary
