@@ -5,7 +5,6 @@ Searches Prowlarr indexers and integrates with Everything for duplicate detectio
 """
 
 import logging
-import math
 import os
 import sys
 import time
@@ -26,12 +25,7 @@ from PySide6.QtGui import (
     QAction,
     QCloseEvent,
     QColor,
-    QIcon,
     QKeyEvent,
-    QKeySequence,
-    QPainter,
-    QPen,
-    QPixmap,
     QStandardItem,
     QStandardItemModel,
 )
@@ -39,21 +33,18 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QCompleter,
-    QDialog,
-    QDialogButtonBox,
     QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QProgressBar,
     QPushButton,
     QSpinBox,
     QSplitter,
     QStatusBar,
     QTableWidget,
-    QTextBrowser,
     QTreeView,
-    QVBoxLayout,
     QWidget,
 )
 from threep_commons.desktop import open_path_in_default_app
@@ -65,6 +56,7 @@ from threep_commons.settings import QSettingsValueStore
 
 from .api.everything_search import EverythingSearch
 from .api.prowlarr_client import ProwlarrClient
+from .app_menu import create_globe_icon, setup_main_window_menu, show_help_dialog
 from .app_results_context import (
     context_copy_title,
     context_web_search,
@@ -149,7 +141,6 @@ from .app_window_support import (
     write_download_history as append_download_history,
 )
 from .constants import APP_IDENTITY, SETTINGS_APP_NAME
-from .ui.help_text import HELP_HTML
 from .ui.log_window import LogWindow
 from .ui.setup_wizard import run_setup_wizard
 from .utils.config import (
@@ -246,6 +237,9 @@ class MainWindow(QMainWindow):
     splitter: QSplitter
     status_bar: QStatusBar
     status_label: QLabel
+    bookmarks_menu: QMenu
+    bookmarks_separator: QAction
+    _bookmarks: list[str]
 
     @staticmethod
     def _object_dict(value: object) -> dict[str, object]:
@@ -303,7 +297,7 @@ class MainWindow(QMainWindow):
         """Apply the static window chrome used before runtime initialization."""
         self.setWindowTitle("Prowlarr Search Client")
         self.setGeometry(100, 100, 1400, 800)
-        self.setWindowIcon(self._create_globe_icon())
+        self.setWindowIcon(create_globe_icon())
 
     def _load_runtime_configuration(self) -> tuple[dict[str, object], list[str]]:
         """Load config, validate it, and return the settings section plus warnings."""
@@ -517,6 +511,42 @@ class MainWindow(QMainWindow):
         """Expose results-column visibility changes to extracted helpers."""
         self._toggle_column_visibility(column, hidden)
 
+    def open_download_history(self) -> None:
+        """Expose the download-history action to extracted menu helpers."""
+        self._open_download_history()
+
+    def fit_columns(self) -> None:
+        """Expose column fitting to extracted menu helpers."""
+        self._fit_columns()
+
+    def reset_view(self) -> None:
+        """Expose view reset to extracted menu helpers."""
+        self._reset_view()
+
+    def edit_preferences_ini_file(self) -> None:
+        """Expose INI editing to extracted menu helpers."""
+        self._edit_preferences_ini_file()
+
+    def add_bookmark(self) -> None:
+        """Expose bookmark creation to extracted menu helpers."""
+        self._add_bookmark()
+
+    def remove_bookmark(self) -> None:
+        """Expose bookmark removal to extracted menu helpers."""
+        self._remove_bookmark()
+
+    def sort_bookmarks(self) -> None:
+        """Expose bookmark sorting to extracted menu helpers."""
+        self._sort_bookmarks()
+
+    def add_bookmark_action(self, query: str) -> None:
+        """Expose bookmark action creation to extracted menu helpers."""
+        self._add_bookmark_action(query)
+
+    def replace_bookmarks(self, bookmarks: list[str]) -> None:
+        """Expose bookmark-list replacement to extracted menu helpers."""
+        self._bookmarks = list(bookmarks)
+
     def setup_ui(self) -> None:
         """Build the main window UI using the extracted layout helpers."""
         setup_main_window_ui(self)
@@ -727,144 +757,14 @@ class MainWindow(QMainWindow):
         ):
             self.fetch_page(value)
 
-    @staticmethod
-    def _create_globe_icon() -> QIcon:
-        """Draw a simple globe icon (circle + meridians + parallels)"""
-        size = 64
-        pix = QPixmap(size, size)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(60, 130, 200), 2)
-        p.setPen(pen)
-        p.setBrush(QColor(180, 220, 255))
-        m = 3  # margin
-        p.drawEllipse(m, m, size - 2 * m, size - 2 * m)
-        # Meridians (vertical ellipses)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        cx, cy, r = size // 2, size // 2, size // 2 - m
-        for offset in (-r // 3, 0, r // 3):
-            w = abs(r - abs(offset))
-            p.drawEllipse(cx + offset - w // 2, m, w, size - 2 * m)
-        # Parallels (horizontal lines as arcs)
-        for dy in (-r // 3, 0, r // 3):
-            half_w = int(math.sqrt(max(0, r * r - dy * dy)))
-            p.drawLine(cx - half_w, cy + dy, cx + half_w, cy + dy)
-        p.end()
-        return QIcon(pix)
-
     def setup_menu(self):
         """Create menu bar"""
-        menubar = self.menuBar()
-
-        # File menu
-        file_menu = menubar.addMenu("&File")
-        exit_action = QAction("E&xit", self)
-        exit_action.setShortcuts([QKeySequence("Ctrl+Q"), QKeySequence("Alt+X")])
-        exit_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
-        exit_action.setStatusTip("Close the application")
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
-
-        # View menu
-        view_menu = menubar.addMenu("&View")
-        log_action = QAction("Show &Log", self)
-        log_action.setStatusTip("Open the log window to view application messages")
-        log_action.triggered.connect(self.toggle_log_window)
-        view_menu.addAction(log_action)
-
-        history_action = QAction("Download &History", self)
-        history_action.setStatusTip("View the log of previously downloaded items")
-        history_action.triggered.connect(self._open_download_history)
-        view_menu.addAction(history_action)
-
-        view_menu.addSeparator()
-
-        best_per_group_action = QAction("Select &Best per Group", self)
-        best_per_group_action.setStatusTip(
-            "Highlight the best result in each title group based on size and seeders"
-        )
-        best_per_group_action.triggered.connect(self.select_best_per_group)
-        view_menu.addAction(best_per_group_action)
-
-        reset_sort_action = QAction("&Reset Sorting", self)
-        reset_sort_action.setStatusTip(
-            "Restore default sort order: Title ASC, Indexer DESC, Age ASC"
-        )
-        reset_sort_action.triggered.connect(self.apply_default_sort)
-        view_menu.addAction(reset_sort_action)
-
-        fit_columns_action = QAction("&Fit Columns", self)
-        fit_columns_action.setStatusTip("Resize visible columns to fit their contents")
-        fit_columns_action.triggered.connect(self._fit_columns)
-        view_menu.addAction(fit_columns_action)
-
-        reset_view_action = QAction("Reset &View", self)
-        reset_view_action.setStatusTip(
-            "Reset column widths, splitter position, and sort order to defaults"
-        )
-        reset_view_action.triggered.connect(self._reset_view)
-        view_menu.addAction(reset_view_action)
-
-        # Tools menu
-        tools_menu = menubar.addMenu("&Tools")
-        edit_ini_action = QAction("Edit &.ini File", self)
-        edit_ini_action.setStatusTip(
-            f"Open preferences INI file: {self.preferences_store.file_name()}"
-        )
-        edit_ini_action.triggered.connect(self._edit_preferences_ini_file)
-        tools_menu.addAction(edit_ini_action)
-
-        # Bookmarks menu
-        self.bookmarks_menu = menubar.addMenu("&Bookmarks")
-        add_bm_action = QAction("&Add Bookmark", self)
-        add_bm_action.setStatusTip("Save the current search query as a bookmark")
-        add_bm_action.triggered.connect(self._add_bookmark)
-        self.bookmarks_menu.addAction(add_bm_action)
-
-        remove_bm_action = QAction("&Delete Bookmark", self)
-        remove_bm_action.setStatusTip("Remove a saved bookmark from the list")
-        remove_bm_action.triggered.connect(self._remove_bookmark)
-        self.bookmarks_menu.addAction(remove_bm_action)
-
-        sort_bm_action = QAction("&Sort Bookmarks", self)
-        sort_bm_action.setStatusTip("Sort all bookmarks alphabetically")
-        sort_bm_action.triggered.connect(self._sort_bookmarks)
-        self.bookmarks_menu.addAction(sort_bm_action)
-
-        self.bookmarks_separator = self.bookmarks_menu.addSeparator()
-
-        # Load saved bookmarks into menu
-        self._bookmarks = self.preferences_store.get_str_list(
-            self._pref_key("bookmarks"),
-            [],
-        )
-        for bm in self._bookmarks:
-            self._add_bookmark_action(bm)
-
-        # Help menu
-        help_menu = menubar.addMenu("&Help")
-        help_action = QAction("&Help", self)
-        help_action.setShortcut("F1")
-        help_action.setStatusTip("Show keyboard shortcuts and usage help")
-        help_action.triggered.connect(self.show_help)
-        help_menu.addAction(help_action)
+        setup_main_window_menu(self)
 
     @safe_slot
     def show_help(self):
         """Show scrollable help dialog"""
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Help")
-        dlg.resize(520, 480)
-        layout = QVBoxLayout(dlg)
-        browser = QTextBrowser(dlg)
-        browser.setOpenExternalLinks(False)
-        browser.setHtml(HELP_HTML)
-        layout.addWidget(browser)
-        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
-        btn_box.accepted.connect(dlg.accept)
-        layout.addWidget(btn_box)
-        dlg.exec()
+        show_help_dialog(self)
 
     @safe_slot
     def _on_init_done(
