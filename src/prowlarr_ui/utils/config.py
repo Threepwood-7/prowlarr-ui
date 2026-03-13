@@ -278,9 +278,7 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         )
 
     settings = _as_object_dict(config.get("settings", {}))
-    if not settings:
-        config["settings"] = {}
-        settings = config["settings"]
+    config["settings"] = settings
 
     defaults = get_default_config()["settings"]
 

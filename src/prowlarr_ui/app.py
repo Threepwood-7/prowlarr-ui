@@ -34,24 +34,18 @@ from PySide6.QtGui import (
     QIcon,
     QKeyEvent,
     QKeySequence,
-    QMouseEvent,
     QPainter,
     QPen,
     QPixmap,
-    QShortcut,
     QStandardItem,
     QStandardItemModel,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
     QCheckBox,
     QCompleter,
     QDialog,
     QDialogButtonBox,
-    QGridLayout,
-    QGroupBox,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -79,6 +73,7 @@ from threep_commons.settings import QSettingsValueStore
 
 from .api.everything_search import EverythingSearch
 from .api.prowlarr_client import ProwlarrClient
+from .app_ui_layout import build_center_panel, build_left_panel, setup_main_window_ui
 from .constants import APP_IDENTITY, SETTINGS_APP_NAME
 from .ui.help_text import HELP_HTML
 from .ui.log_window import LogWindow
@@ -153,6 +148,31 @@ class MainWindow(QMainWindow):
         "Indexer",
         "Download",
     ]
+
+    activity_bar: QProgressBar
+    categories_model: QStandardItemModel
+    categories_tree: QTreeView
+    completer: QCompleter
+    download_all_btn: QPushButton
+    download_progress: QProgressBar
+    download_selected_btn: QPushButton
+    filter_max_age: QSpinBox
+    filter_min_size: QSpinBox
+    filter_title_input: QLineEdit
+    find_bar: QWidget
+    find_input: QLineEdit
+    hide_existing_checkbox: QCheckBox
+    indexers_model: QStandardItemModel
+    indexers_tree: QTreeView
+    load_all_btn: QPushButton
+    prowlarr_page_number_spinbox: QSpinBox
+    prowlarr_page_size_spinbox: QSpinBox
+    query_input: QLineEdit
+    results_table: QTableWidget
+    search_btn: QPushButton
+    splitter: QSplitter
+    status_bar: QStatusBar
+    status_label: QLabel
 
     @staticmethod
     def _object_dict(value: object) -> dict[str, object]:
@@ -402,6 +422,54 @@ class MainWindow(QMainWindow):
         namespace = "prefs" if name in PREFS_NAMESPACE_KEYS else "ui"
         return f"{namespace}/{name}"
 
+    def pref_key(self, name: str) -> str:
+        """Expose the preference-key helper to layout collaborators."""
+        return self._pref_key(name)
+
+    def setup_ui(self) -> None:
+        """Build the main window UI using the extracted layout helpers."""
+        setup_main_window_ui(self)
+
+    def create_left_panel(self) -> QWidget:
+        """Build the left control panel using the extracted layout helpers."""
+        return build_left_panel(self)
+
+    def create_center_panel(self) -> QWidget:
+        """Build the center results panel using the extracted layout helpers."""
+        return build_center_panel(self)
+
+    def on_search_return_pressed(self) -> None:
+        """Forward the search-box return key handler."""
+        self._on_search_return_pressed()
+
+    def show_header_context_menu(self, pos: QPoint) -> None:
+        """Forward the results-header context menu handler."""
+        self._show_header_context_menu(pos)
+
+    def show_context_menu(self, pos: QPoint) -> None:
+        """Forward the results-table context menu handler."""
+        self._show_context_menu(pos)
+
+    def on_cell_double_clicked(self, row: int, column: int) -> None:
+        """Forward double-click handling for result rows."""
+        self._on_cell_double_clicked(row, column)
+
+    def toggle_find_bar(self) -> None:
+        """Forward the Ctrl+F find-bar toggle."""
+        self._toggle_find_bar()
+
+    def close_find_bar(self) -> None:
+        """Forward the find-bar close action."""
+        self._close_find_bar()
+
+    def find_next(self) -> None:
+        """Forward the next-match action for the find bar."""
+        self._find_next()
+
+    def find_prev(self) -> None:
+        """Forward the previous-match action for the find bar."""
+        self._find_prev()
+
     def _schedule_preferences_sync(self, delay_ms: int = 300):
         """Debounce INI sync to avoid frequent disk writes."""
         self._prefs_dirty = True
@@ -567,391 +635,6 @@ class MainWindow(QMainWindow):
             and not self.current_worker
         ):
             self.fetch_page(value)
-
-    def setup_ui(self):
-        """Build the main UI layout"""
-        # Create central widget with proper hierarchy
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-
-        # Main layout without margins to avoid background text issues
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        central_widget.setLayout(main_layout)
-
-        # Activity bar at top of window (thin progress bar)
-        self.activity_bar = QProgressBar()
-        self.activity_bar.setFixedHeight(4)
-        self.activity_bar.setTextVisible(False)
-        self.activity_bar.setRange(0, 1)
-        self.activity_bar.setValue(1)  # full = idle
-        main_layout.addWidget(self.activity_bar)
-
-        # Horizontal splitter for left panel and center panel
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_layout.addWidget(self.splitter)
-
-        # Create left and center panels
-        left_panel = self.create_left_panel()
-        center_panel = self.create_center_panel()
-
-        self.splitter.addWidget(left_panel)
-        self.splitter.addWidget(center_panel)
-
-        # Load saved splitter sizes or use defaults.
-        saved_sizes = self.preferences_store.get_int_list(
-            self._pref_key("splitter_sizes"),
-            [300, 1100],
-        ) or [300, 1100]
-        self.splitter.setSizes(saved_sizes)
-
-        # Connect to save splitter position when moved
-        self.splitter.splitterMoved.connect(self.on_splitter_moved)
-
-        # Status bar at bottom
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-
-        # Status label for messages (stretch=1 to fill available space)
-        self.status_label = QLabel("Loading...")
-        self.status_bar.addWidget(self.status_label, 1)
-
-    def create_left_panel(self) -> QWidget:
-        """Create left control panel with search controls"""
-        panel = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(4)
-        panel.setLayout(layout)
-
-        # === Search group ===
-        search_group = QGroupBox("Search")
-        search_layout = QVBoxLayout()
-        search_layout.setContentsMargins(6, 6, 6, 6)
-        search_layout.setSpacing(4)
-        search_group.setLayout(search_layout)
-
-        # Search query input with autocomplete
-        search_label = QLabel("Search &Query:")
-        search_layout.addWidget(search_label)
-        self.query_input = QLineEdit()
-        search_label.setBuddy(self.query_input)
-        self.query_input.setPlaceholderText("Enter search query...")
-        self.query_input.returnPressed.connect(self._on_search_return_pressed)
-
-        # Setup autocomplete from history
-        self.completer = QCompleter(self.search_history)
-        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.query_input.setCompleter(self.completer)
-
-        # Show suggestions when clicking in the search box
-        def show_completer_on_focus(event: QMouseEvent) -> None:
-            QLineEdit.mousePressEvent(self.query_input, event)
-            if not self.query_input.text():
-                self.completer.complete()
-
-        self.query_input.mousePressEvent = show_completer_on_focus
-
-        # Show history on Down arrow in empty search box
-        original_key_press = self.query_input.keyPressEvent
-
-        def search_key_press(event: QKeyEvent) -> None:
-            if event.key() == Qt.Key.Key_Down and not self.query_input.text():
-                self.completer.setCompletionPrefix("")
-                self.completer.complete()
-                return
-            original_key_press(event)
-
-        self.query_input.keyPressEvent = search_key_press
-
-        search_layout.addWidget(self.query_input)
-        self.query_input.setToolTip(
-            "Enter a search term and press Enter to search Prowlarr indexers\n"
-            "Press Down or Enter when empty to browse search history"
-        )
-
-        # Search buttons
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(4)
-
-        self.search_btn = QPushButton("&Search")
-        self.search_btn.clicked.connect(self.start_search)
-        self.search_btn.setToolTip("Search Prowlarr with the current query and filters")
-        button_layout.addWidget(self.search_btn)
-
-        self.load_all_btn = QPushButton("Load A&ll")
-        self.load_all_btn.clicked.connect(self.start_load_all_pages)
-        self.load_all_btn.setToolTip("Fetch all pages of results sequentially")
-        button_layout.addWidget(self.load_all_btn)
-
-        search_layout.addLayout(button_layout)
-        layout.addWidget(search_group)
-
-        # === Pagination group ===
-        pagination_group = QGroupBox("Pagination")
-        pagination_layout = QGridLayout()
-        pagination_layout.setContentsMargins(6, 6, 6, 6)
-        pagination_layout.setSpacing(4)
-        pagination_group.setLayout(pagination_layout)
-
-        # Max page size spinbox (left column)
-        page_size_label = QLabel("&Max Page Size:")
-        pagination_layout.addWidget(page_size_label, 0, 0)
-        self.prowlarr_page_size_spinbox = QSpinBox()
-        page_size_label.setBuddy(self.prowlarr_page_size_spinbox)
-        self.prowlarr_page_size_spinbox.setMinimum(10)
-        self.prowlarr_page_size_spinbox.setMaximum(10000)
-        self.prowlarr_page_size_spinbox.setSingleStep(100)
-        self.prowlarr_page_size_spinbox.setValue(self.prowlarr_page_size)
-        self.prowlarr_page_size_spinbox.valueChanged.connect(
-            self.on_prowlarr_page_size_changed
-        )
-        self.prowlarr_page_size_spinbox.setToolTip(
-            "Maximum number of results to fetch per page from Prowlarr"
-        )
-        pagination_layout.addWidget(self.prowlarr_page_size_spinbox, 1, 0)
-
-        # Page number spinbox (right column)
-        page_num_label = QLabel("Page &Number:")
-        pagination_layout.addWidget(page_num_label, 0, 1)
-        self.prowlarr_page_number_spinbox = QSpinBox()
-        page_num_label.setBuddy(self.prowlarr_page_number_spinbox)
-        self.prowlarr_page_number_spinbox.setMinimum(1)
-        self.prowlarr_page_number_spinbox.setMaximum(300)
-        self.prowlarr_page_number_spinbox.setSingleStep(1)
-        self.prowlarr_page_number_spinbox.setValue(1)
-        self.prowlarr_page_number_spinbox.valueChanged.connect(
-            self.on_prowlarr_page_number_changed
-        )
-        self.prowlarr_page_number_spinbox.setToolTip(
-            "Page number for paginated results (search again to apply)"
-        )
-        pagination_layout.addWidget(self.prowlarr_page_number_spinbox, 1, 1)
-
-        layout.addWidget(pagination_group)
-
-        # === Filters group ===
-        filters_group = QGroupBox("Filters")
-        filters_layout = QVBoxLayout()
-        filters_layout.setContentsMargins(6, 6, 6, 6)
-        filters_layout.setSpacing(4)
-        filters_group.setLayout(filters_layout)
-
-        # Indexers tree view with checkboxes
-        indexers_label = QLabel("&Indexers:")
-        filters_layout.addWidget(indexers_label)
-        self.indexers_tree = QTreeView()
-        indexers_label.setBuddy(self.indexers_tree)
-        self.indexers_model = QStandardItemModel()
-        self.indexers_tree.setModel(self.indexers_model)
-        self.indexers_tree.setHeaderHidden(True)
-        self.indexers_tree.setToolTip(
-            "Select which Prowlarr indexers to search\nUse 'All' to toggle all at once"
-        )
-        filters_layout.addWidget(self.indexers_tree, 1)  # stretch=1
-
-        # Categories tree view with checkboxes
-        categories_label = QLabel("Ca&tegories:")
-        filters_layout.addWidget(categories_label)
-        self.categories_tree = QTreeView()
-        categories_label.setBuddy(self.categories_tree)
-        self.categories_model = QStandardItemModel()
-        self.categories_tree.setModel(self.categories_model)
-        self.categories_tree.setHeaderHidden(True)
-        self.categories_tree.setToolTip(
-            "Filter results by category (Movies, TV, Audio, etc.)\n"
-            "Use 'All' to toggle all at once"
-        )
-        filters_layout.addWidget(self.categories_tree, 2)  # stretch=2
-
-        # Hide existing checkbox
-        self.hide_existing_checkbox = QCheckBox("Hide &existing")
-        saved_hide = self.preferences_store.get_bool(
-            self._pref_key("hide_existing"),
-            False,
-        )
-        self.hide_existing_checkbox.setChecked(saved_hide)
-        self.hide_existing_checkbox.toggled.connect(self.on_hide_existing_toggled)
-        self.hide_existing_checkbox.setToolTip(
-            "Hide results that already exist on disk (detected via Everything)"
-        )
-        filters_layout.addWidget(self.hide_existing_checkbox)
-
-        layout.addWidget(filters_group, 1)  # filters group takes remaining space
-
-        # === Download section (ungrouped, at bottom) ===
-        download_layout = QHBoxLayout()
-        download_layout.setSpacing(4)
-
-        self.download_selected_btn = QPushButton("&Download Selected")
-        self.download_selected_btn.clicked.connect(self.download_selected)
-        self.download_selected_btn.setEnabled(False)
-        self.download_selected_btn.setToolTip(
-            "Download highlighted rows (Ctrl+Click to multi-select)"
-        )
-        download_layout.addWidget(self.download_selected_btn)
-
-        self.download_all_btn = QPushButton("Download &All")
-        self.download_all_btn.clicked.connect(self.download_all)
-        self.download_all_btn.setEnabled(False)
-        self.download_all_btn.setToolTip("Download all visible (non-hidden) results")
-        download_layout.addWidget(self.download_all_btn)
-
-        layout.addLayout(download_layout)
-
-        # Download progress bar (always visible, resets to 0 when idle)
-        self.download_progress = QProgressBar()
-        self.download_progress.setTextVisible(True)
-        self.download_progress.setFormat("%v/%m")
-        self.download_progress.setMaximum(1)
-        self.download_progress.setValue(0)
-        layout.addWidget(self.download_progress)
-
-        return panel
-
-    def create_center_panel(self) -> QWidget:
-        """Create center results panel with table and filter bar"""
-        panel = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
-        panel.setLayout(layout)
-
-        # Filter bar
-        filter_layout = QHBoxLayout()
-        filter_layout.setContentsMargins(4, 2, 4, 2)
-
-        filter_label = QLabel("Filte&r:")
-        filter_layout.addWidget(filter_label)
-        self.filter_title_input = QLineEdit()
-        filter_label.setBuddy(self.filter_title_input)
-        self.filter_title_input.setPlaceholderText("Title contains...")
-        self.filter_title_input.setToolTip(
-            "Filter results by title (case-insensitive, Alt+R)"
-        )
-        self.filter_title_input.textChanged.connect(self.apply_result_filters)
-        filter_layout.addWidget(self.filter_title_input, 1)
-
-        filter_layout.addWidget(QLabel("Min Size:"))
-        self.filter_min_size = QSpinBox()
-        self.filter_min_size.setRange(0, 999999)
-        self.filter_min_size.setSuffix(" MB")
-        self.filter_min_size.setToolTip("Minimum file size in MB (0 = no minimum)")
-        self.filter_min_size.valueChanged.connect(self.apply_result_filters)
-        filter_layout.addWidget(self.filter_min_size)
-
-        filter_layout.addWidget(QLabel("Max Age:"))
-        self.filter_max_age = QSpinBox()
-        self.filter_max_age.setRange(0, 99999)
-        self.filter_max_age.setSuffix(" days")
-        self.filter_max_age.setToolTip("Maximum age in days (0 = no limit)")
-        self.filter_max_age.valueChanged.connect(self.apply_result_filters)
-        filter_layout.addWidget(self.filter_max_age)
-
-        clear_filter_btn = QPushButton("Clear")
-        clear_filter_btn.setToolTip("Clear all filters")
-        clear_filter_btn.clicked.connect(self.clear_result_filters)
-        filter_layout.addWidget(clear_filter_btn)
-
-        layout.addLayout(filter_layout)
-
-        # Results table
-        self.results_table = QTableWidget()
-        self.results_table.setColumnCount(self.COL_COUNT)
-        self.results_table.setHorizontalHeaderLabels(self.COL_HEADERS)
-
-        # Configure table headers
-        header = self.results_table.horizontalHeader()
-        header.setStretchLastSection(False)
-        header.setSectionResizeMode(
-            self.COL_TITLE, QHeaderView.ResizeMode.Stretch
-        )  # Title column stretches
-
-        # Configure table behavior
-        self.results_table.setAlternatingRowColors(
-            False
-        )  # We'll handle colors manually
-        self.results_table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows
-        )
-        self.results_table.setSelectionMode(
-            QAbstractItemView.SelectionMode.ExtendedSelection
-        )
-        self.results_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.results_table.setSortingEnabled(True)
-
-        # Header right-click to show/hide columns
-        header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        header.customContextMenuRequested.connect(self._show_header_context_menu)
-
-        # Restore hidden columns from preferences
-        hidden_cols = self.preferences_store.get_str_list(
-            self._pref_key("hidden_columns"),
-            [],
-        )
-        for col_name in hidden_cols:
-            if col_name in self.COL_HEADERS:
-                col_idx = self.COL_HEADERS.index(col_name)
-                if col_idx != self.COL_TITLE:  # Never hide Title
-                    self.results_table.setColumnHidden(col_idx, True)
-
-        # Connect to sort change signal to re-apply coloring
-        header.sectionClicked.connect(self.on_sort_changed)
-
-        # Connect selection change to update Download Selected button state
-        self.results_table.itemSelectionChanged.connect(
-            self.update_download_button_states
-        )
-
-        # Override keyboard handler for shortcuts
-        self.results_table.keyPressEvent = self.table_key_press
-
-        # Right-click context menu
-        self.results_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.results_table.customContextMenuRequested.connect(self._show_context_menu)
-
-        # Double-click to download
-        self.results_table.cellDoubleClicked.connect(self._on_cell_double_clicked)
-
-        layout.addWidget(self.results_table)
-
-        # Find bar (hidden by default, shown with Ctrl+F)
-        self.find_bar = QWidget()
-        find_layout = QHBoxLayout()
-        find_layout.setContentsMargins(4, 2, 4, 2)
-        find_layout.addWidget(QLabel("Find:"))
-        self.find_input = QLineEdit()
-        self.find_input.setPlaceholderText(
-            "Search in titles... (Enter=next, Shift+Enter=prev, Esc=close)"
-        )
-        self.find_input.returnPressed.connect(self._find_next)
-        find_layout.addWidget(self.find_input, 1)
-        find_prev_btn = QPushButton("<")
-        find_prev_btn.setFixedWidth(30)
-        find_prev_btn.setToolTip("Find previous (Shift+Enter)")
-        find_prev_btn.clicked.connect(self._find_prev)
-        find_layout.addWidget(find_prev_btn)
-        find_next_btn = QPushButton(">")
-        find_next_btn.setFixedWidth(30)
-        find_next_btn.setToolTip("Find next (Enter)")
-        find_next_btn.clicked.connect(self._find_next)
-        find_layout.addWidget(find_next_btn)
-        find_close_btn = QPushButton("X")
-        find_close_btn.setFixedWidth(30)
-        find_close_btn.setToolTip("Close find bar (Esc)")
-        find_close_btn.clicked.connect(self._close_find_bar)
-        find_layout.addWidget(find_close_btn)
-        self.find_bar.setLayout(find_layout)
-        self.find_bar.setVisible(False)
-        layout.addWidget(self.find_bar)
-
-        # Ctrl+F shortcut
-        find_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
-        find_shortcut.activated.connect(self._toggle_find_bar)
-
-        # Esc to close find bar when focused
-        self.find_input.installEventFilter(self)
-
-        return panel
 
     @staticmethod
     def _create_globe_icon() -> QIcon:
