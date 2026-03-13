@@ -7,7 +7,6 @@ Searches Prowlarr indexers and integrates with Everything for duplicate detectio
 import logging
 import math
 import os
-import subprocess
 import sys
 import time
 import traceback
@@ -19,8 +18,6 @@ from urllib.parse import quote
 
 from PySide6.QtCore import (
     QEvent,
-    QItemSelection,
-    QItemSelectionModel,
     QObject,
     QPoint,
     QStringListModel,
@@ -71,6 +68,33 @@ from threep_commons.settings import QSettingsValueStore
 
 from .api.everything_search import EverythingSearch
 from .api.prowlarr_client import ProwlarrClient
+from .app_results_navigation import (
+    close_find_bar as close_results_find_bar,
+)
+from .app_results_navigation import (
+    find_in_table as find_results_in_table,
+)
+from .app_results_navigation import (
+    find_next as find_next_result,
+)
+from .app_results_navigation import (
+    find_prev as find_prev_result,
+)
+from .app_results_navigation import (
+    handle_find_event,
+)
+from .app_results_navigation import (
+    jump_title_group as jump_result_title_group,
+)
+from .app_results_navigation import (
+    run_custom_command as run_results_custom_command,
+)
+from .app_results_navigation import (
+    table_key_press as handle_results_table_key_press,
+)
+from .app_results_navigation import (
+    toggle_find_bar as toggle_results_find_bar,
+)
 from .app_results_rendering import (
     build_palette_colors,
     reapply_result_row_colors,
@@ -438,6 +462,10 @@ class MainWindow(QMainWindow):
             and indexer_id >= 0
             and (guid, indexer_id) in self._downloaded_release_keys
         )
+
+    def get_video_path_for_row(self, row: int) -> str | None:
+        """Expose row-to-video-path lookup to extracted collaborators."""
+        return self._get_video_path_for_row(row)
 
     def setup_ui(self) -> None:
         """Build the main window UI using the extracted layout helpers."""
@@ -3483,293 +3511,45 @@ class MainWindow(QMainWindow):
 
     @safe_slot
     def _toggle_find_bar(self):
-        """Toggle the find bar visibility"""
-        if self.find_bar.isVisible():
-            self._close_find_bar()
-        else:
-            self.find_bar.setVisible(True)
-            self.find_input.setFocus()
-            self.find_input.selectAll()
+        """Toggle the find bar visibility."""
+        toggle_results_find_bar(self)
 
     @safe_slot
     def _close_find_bar(self):
-        """Hide the find bar and return focus to table"""
-        self.find_bar.setVisible(False)
-        self.results_table.setFocus()
+        """Hide the find bar and return focus to the results table."""
+        close_results_find_bar(self)
 
     @safe_slot
     def _find_next(self):
-        """Find next matching row in the table"""
-        self._find_in_table(forward=True)
+        """Find the next matching row in the results table."""
+        find_next_result(self)
 
     @safe_slot
     def _find_prev(self):
-        """Find previous matching row in the table"""
-        self._find_in_table(forward=False)
+        """Find the previous matching row in the results table."""
+        find_prev_result(self)
 
     def _find_in_table(self, forward: bool = True):
-        """Search table titles for the find text, selecting the next/prev match"""
-        text = self.find_input.text().strip().lower()
-        if not text:
-            return
-
-        row_count = self.results_table.rowCount()
-        if row_count == 0:
-            return
-
-        current = self.results_table.currentRow()
-        start = (current + (1 if forward else -1)) % row_count
-
-        for i in range(row_count):
-            row = (start + (i if forward else -i)) % row_count
-            if self.results_table.isRowHidden(row):
-                continue
-            title_item = self.results_table.item(row, self.COL_TITLE)
-            if title_item and text in title_item.text().lower():
-                self.results_table.setCurrentCell(row, self.COL_TITLE)
-                self.results_table.scrollToItem(title_item)
-                self.status_label.setText(f"Found: row {row + 1}")
-                return
-
-        self.status_label.setText(f"Not found: '{self.find_input.text()}'")
+        """Search table titles for the find text and select the next match."""
+        find_results_in_table(self, forward=forward)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        """Handle Esc key in find bar to close it"""
-        if obj == self.find_input and event.type() == QEvent.Type.KeyPress:
-            key_event = cast("QKeyEvent", event)
-            if key_event.key() == Qt.Key.Key_Escape:
-                self._close_find_bar()
-                return True
-            if (
-                key_event.key() == Qt.Key.Key_Return
-                and key_event.modifiers() & Qt.KeyboardModifier.ShiftModifier
-            ):
-                self._find_prev()
-                return True
+        """Handle find-bar keyboard shortcuts before falling back to Qt."""
+        if handle_find_event(self, obj, event):
+            return True
         return super().eventFilter(obj, event)
 
-    def _move_to_next_visible_result_row(self, current_row: int) -> None:
-        """Advance selection to the next visible result row."""
-        next_row = current_row + 1
-        while (
-            next_row < self.results_table.rowCount()
-            and self.results_table.isRowHidden(next_row)
-        ):
-            next_row += 1
-        if next_row < self.results_table.rowCount():
-            self.results_table.setCurrentCell(next_row, self.COL_AGE)
-
-    def _handle_table_download_shortcut(self, event: QKeyEvent) -> bool:
-        """Download the current row and move to the next visible result."""
-        current_row = self.results_table.currentRow()
-        if current_row < 0:
-            return False
-        self.download_release(current_row)
-        self._move_to_next_visible_result_row(current_row)
-        event.accept()
-        return True
-
-    def _handle_everything_launch_shortcut(self, event: QKeyEvent) -> bool:
-        """Launch Everything for the current release title."""
-        if not self.everything:
-            self.status_label.setText("Everything not initialized yet")
-            event.accept()
-            return True
-        title = self.get_current_row_title()
-        if not title:
-            return False
-        self.everything.launch_search(title)
-        self.log(f"Launched Everything search for: {title}")
-        event.accept()
-        return True
-
-    def _handle_copy_title_shortcut(self, event: QKeyEvent) -> bool:
-        """Copy the current release title to the clipboard."""
-        title = self.get_current_row_title()
-        if not title:
-            return False
-        clipboard = QApplication.clipboard()
-        clipboard.setText(title)
-        self.log(f"Copied to clipboard: {title}")
-        self.status_label.setText("Title copied to clipboard")
-        event.accept()
-        return True
-
-    def _handle_web_search_shortcut(self, event: QKeyEvent) -> bool:
-        """Open the configured web search for the current release title."""
-        title = self.get_current_row_title()
-        if not title:
-            return False
-        url = self.web_search_url.replace("{query}", quote(title))
-        webbrowser.open(url)
-        self.log(f"Opened web search for: {title}")
-        event.accept()
-        return True
-
-    def _handle_play_video_shortcut(self, event: QKeyEvent) -> bool:
-        """Open the matched video file for the current row when available."""
-        current_row = self.results_table.currentRow()
-        if current_row < 0:
-            return False
-        video_path = self._get_video_path_for_row(current_row)
-        if video_path:
-            self.log(f"Playing: {video_path}")
-            self.status_label.setText(f"Playing: {os.path.basename(video_path)}")
-            open_path_in_default_app(video_path)
-        else:
-            self.status_label.setText("No video file found in Everything results")
-        event.accept()
-        return True
-
-    def _handle_custom_command_shortcut(
-        self,
-        key: Qt.Key,
-        event: QKeyEvent,
-    ) -> bool:
-        """Run the custom command bound to the pressed key, if any."""
-        if key not in self.custom_commands:
-            return False
-        command = self.custom_commands[key]
-        if command:
-            self._run_custom_command(key, command)
-        else:
-            key_name = {
-                Qt.Key.Key_F2: "F2",
-                Qt.Key.Key_F3: "F3",
-                Qt.Key.Key_F4: "F4",
-            }.get(key, "?")
-            self.status_label.setText(
-                "No custom command configured for "
-                f"{key_name} (set custom_command_{key_name} in config)"
-            )
-        event.accept()
-        return True
-
-    def _handle_select_all_visible_shortcut(self, event: QKeyEvent) -> bool:
-        """Select all currently visible result rows."""
-        selection_model = self.results_table.selectionModel()
-        selection = QItemSelection()
-        col_count = self.results_table.columnCount()
-        model = self.results_table.model()
-        for row in range(self.results_table.rowCount()):
-            if self.results_table.isRowHidden(row):
-                continue
-            top_left = model.index(row, 0)
-            bottom_right = model.index(row, col_count - 1)
-            selection.select(top_left, bottom_right)
-        selection_model.select(
-            selection,
-            QItemSelectionModel.SelectionFlag.ClearAndSelect,
-        )
-        visible = len(selection.indexes()) // max(col_count, 1)
-        self.status_label.setText(f"Selected {visible} visible rows")
-        event.accept()
-        return True
-
-    def _handle_title_group_jump_shortcut(
-        self,
-        forward: bool,
-        event: QKeyEvent,
-    ) -> bool:
-        """Jump to the next or previous title group."""
-        self._jump_title_group(forward=forward)
-        event.accept()
-        return True
-
     def table_key_press(self, event: QKeyEvent) -> None:
-        """
-        Handle keyboard shortcuts in results table
-        Space: Download current row and move to next
-        S: Launch Everything.exe with release title
-        C: Copy release title to clipboard
-        G: Open web search with release title
-        P: Play video file found by Everything
-        """
-        key = Qt.Key(event.key())
-        modifiers = event.modifiers()
-
-        if key == Qt.Key.Key_Space and self._handle_table_download_shortcut(event):
-            return
-        if key == Qt.Key.Key_S and self._handle_everything_launch_shortcut(event):
-            return
-        if key == Qt.Key.Key_C and self._handle_copy_title_shortcut(event):
-            return
-        if key == Qt.Key.Key_G and self._handle_web_search_shortcut(event):
-            return
-        if key == Qt.Key.Key_P and self._handle_play_video_shortcut(event):
-            return
-        if self._handle_custom_command_shortcut(key, event):
-            return
-        if key == Qt.Key.Key_A and modifiers & Qt.KeyboardModifier.ControlModifier:
-            self._handle_select_all_visible_shortcut(event)
-            return
-        if key == Qt.Key.Key_Tab:
-            self._handle_title_group_jump_shortcut(
-                not bool(modifiers & Qt.KeyboardModifier.ShiftModifier),
-                event,
-            )
-            return
-
-        # Pass other keys to default handler
-        QTableWidget.keyPressEvent(self.results_table, event)
+        """Handle keyboard shortcuts in the results table."""
+        handle_results_table_key_press(self, event)
 
     def _jump_title_group(self, forward: bool = True):
-        """Jump to the first row of the next/previous title group"""
-        current_row = self.results_table.currentRow()
-        if current_row < 0:
-            return
-
-        row_count = self.results_table.rowCount()
-        if row_count == 0:
-            return
-
-        # Get current title group key
-        current_title_item = self.results_table.item(current_row, self.COL_TITLE)
-        if not current_title_item:
-            return
-        current_key = current_title_item.text()[: self.title_match_chars].lower()
-
-        # Search for next row with a different title group key
-        step = 1 if forward else -1
-        row = current_row + step
-        while 0 <= row < row_count:
-            if not self.results_table.isRowHidden(row):
-                title_item = self.results_table.item(row, self.COL_TITLE)
-                if title_item:
-                    key = title_item.text()[: self.title_match_chars].lower()
-                    if key != current_key:
-                        self.results_table.setCurrentCell(row, self.COL_TITLE)
-                        self.results_table.scrollToItem(title_item)
-                        return
-            row += step
+        """Jump to the first row of the next or previous title group."""
+        jump_result_title_group(self, forward=forward)
 
     def _run_custom_command(self, key: Qt.Key, cmd_template: str) -> None:
-        """Run a custom command with {title} and {video} placeholders"""
-        current_row = self.results_table.currentRow()
-        if current_row < 0:
-            self.status_label.setText("No row selected")
-            return
-
-        title = self.get_current_row_title() or ""
-        video = self._get_video_path_for_row(current_row) or ""
-        key_name = {Qt.Key.Key_F2: "F2", Qt.Key.Key_F3: "F3", Qt.Key.Key_F4: "F4"}.get(
-            key, "?"
-        )
-
-        # Build argument list safely (no shell=True)
-        import shlex
-
-        cmd = cmd_template.replace("{title}", title).replace("{video}", video)
-
-        self.log(f"{key_name} command: {cmd}")
-        self.status_label.setText(f"Running {key_name} command...")
-
-        try:
-            args = shlex.split(cmd, posix=False)
-            subprocess.Popen(args)
-        except Exception as e:
-            self.log(f"{key_name} command failed: {e}")
-            self.status_label.setText(f"{key_name} command failed: {e}")
+        """Run a custom command with title and video placeholders."""
+        run_results_custom_command(self, key, cmd_template)
 
     def _refresh_spinner(self):
         """Apply spinner state from active operation tags."""
