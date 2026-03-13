@@ -10,11 +10,9 @@ import os
 import sys
 import time
 import traceback
-import webbrowser
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import ClassVar, TypedDict, cast
-from urllib.parse import quote
 
 from PySide6.QtCore import (
     QEvent,
@@ -47,7 +45,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
-    QMenu,
     QProgressBar,
     QPushButton,
     QSpinBox,
@@ -68,6 +65,19 @@ from threep_commons.settings import QSettingsValueStore
 
 from .api.everything_search import EverythingSearch
 from .api.prowlarr_client import ProwlarrClient
+from .app_results_context import (
+    context_copy_title,
+    context_web_search,
+)
+from .app_results_context import (
+    on_cell_double_clicked as handle_results_double_click,
+)
+from .app_results_context import (
+    show_context_menu as show_results_context_menu,
+)
+from .app_results_context import (
+    show_header_context_menu as show_results_header_context_menu,
+)
 from .app_results_navigation import (
     close_find_bar as close_results_find_bar,
 )
@@ -466,6 +476,10 @@ class MainWindow(QMainWindow):
     def get_video_path_for_row(self, row: int) -> str | None:
         """Expose row-to-video-path lookup to extracted collaborators."""
         return self._get_video_path_for_row(row)
+
+    def toggle_column_visibility(self, column: int, hidden: bool) -> None:
+        """Expose results-column visibility changes to extracted helpers."""
+        self._toggle_column_visibility(column, hidden)
 
     def setup_ui(self) -> None:
         """Build the main window UI using the extracted layout helpers."""
@@ -3379,135 +3393,26 @@ class MainWindow(QMainWindow):
 
     @safe_slot
     def _on_cell_double_clicked(self, row: int, _column: int):
-        """Download release on double-click"""
-        self.download_release(row)
+        """Download the release for a double-clicked results row."""
+        handle_results_double_click(self, row)
 
     @safe_slot
     def _show_header_context_menu(self, pos: QPoint) -> None:
-        """Show right-click context menu on table header to toggle column visibility"""
-        menu = QMenu(self)
-        for col in range(self.COL_COUNT):
-            if col == self.COL_TITLE:
-                continue  # Title column is always visible
-            name = self.COL_HEADERS[col]
-            action = menu.addAction(name)
-            action.setCheckable(True)
-            action.setChecked(not self.results_table.isColumnHidden(col))
-
-            def toggle_column(checked: bool, c: int = col) -> None:
-                self._toggle_column_visibility(c, not checked)
-
-            action.toggled.connect(toggle_column)
-        menu.exec(self.results_table.horizontalHeader().mapToGlobal(pos))
+        """Show the results-header context menu."""
+        show_results_header_context_menu(self, pos)
 
     @safe_slot
     def _show_context_menu(self, pos: QPoint) -> None:
-        """Show right-click context menu on results table"""
-        row = self.results_table.rowAt(pos.y())
-        if row < 0:
-            return
-
-        menu = QMenu(self)
-
-        # Download
-        download_action = menu.addAction("Download (Space)")
-
-        def trigger_download() -> None:
-            self.download_release(row)
-
-        download_action.triggered.connect(trigger_download)
-
-        menu.addSeparator()
-
-        # Copy title
-        copy_action = menu.addAction("Copy Title (C)")
-
-        def trigger_copy_title() -> None:
-            self._context_copy_title(row)
-
-        copy_action.triggered.connect(trigger_copy_title)
-
-        # Web search
-        web_action = menu.addAction("Web Search (G)")
-
-        def trigger_web_search() -> None:
-            self._context_web_search(row)
-
-        web_action.triggered.connect(trigger_web_search)
-
-        # Play video
-        play_action = menu.addAction("Play Video (P)")
-        video_path = self._get_video_path_for_row(row)
-        play_action.setEnabled(video_path is not None)
-
-        def _play_video():
-            try:
-                if video_path:
-                    open_path_in_default_app(video_path)
-            except Exception as e:
-                logger.error(f"Failed to play video: {e}")
-
-        play_action.triggered.connect(_play_video)
-
-        # Everything search
-        if self.everything:
-            everything = self.everything
-            everything_action = menu.addAction("Search Everything (S)")
-            title_item = self.results_table.item(row, self.COL_TITLE)
-            title = title_item.text() if title_item else None
-            everything_action.setEnabled(title is not None)
-
-            def _search_everything():
-                try:
-                    if title:
-                        everything.launch_search(title)
-                except Exception as e:
-                    logger.error(f"Failed to launch Everything: {e}")
-
-            everything_action.triggered.connect(_search_everything)
-
-        # Custom commands
-        for key, label in [
-            (Qt.Key.Key_F2, "F2"),
-            (Qt.Key.Key_F3, "F3"),
-            (Qt.Key.Key_F4, "F4"),
-        ]:
-            cmd = self.custom_commands.get(key, "")
-            if cmd:
-                action = menu.addAction(f"Custom Command {label}")
-
-                def trigger_custom_command(
-                    _checked: bool = False,
-                    k: Qt.Key = key,
-                    c: str = cmd,
-                ) -> None:
-                    self._run_custom_command(k, c)
-
-                action.triggered.connect(trigger_custom_command)
-
-        menu.exec(self.results_table.viewport().mapToGlobal(pos))
+        """Show the per-row results context menu."""
+        show_results_context_menu(self, pos)
 
     def _context_copy_title(self, row: int):
-        """Copy title from specific row to clipboard"""
-        try:
-            title_item = self.results_table.item(row, self.COL_TITLE)
-            if title_item:
-                QApplication.clipboard().setText(title_item.text())
-                self.log(f"Copied to clipboard: {title_item.text()}")
-                self.status_label.setText("Title copied to clipboard")
-        except Exception as e:
-            logger.error(f"Failed to copy title: {e}")
+        """Copy the title from one result row to the clipboard."""
+        context_copy_title(self, row)
 
     def _context_web_search(self, row: int):
-        """Open web search for specific row's title"""
-        try:
-            title_item = self.results_table.item(row, self.COL_TITLE)
-            if title_item:
-                url = self.web_search_url.replace("{query}", quote(title_item.text()))
-                webbrowser.open(url)
-                self.log(f"Opened web search for: {title_item.text()}")
-        except Exception as e:
-            logger.error(f"Failed to open web search: {e}")
+        """Open the configured web search for one result row."""
+        context_web_search(self, row)
 
     @safe_slot
     def _toggle_find_bar(self):
