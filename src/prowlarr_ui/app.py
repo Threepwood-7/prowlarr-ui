@@ -14,7 +14,7 @@ import traceback
 import webbrowser
 from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import Any, ClassVar, TypedDict, cast
+from typing import ClassVar, TypedDict, cast
 from urllib.parse import quote
 
 from PySide6.QtCore import (
@@ -224,21 +224,22 @@ class MainWindow(QMainWindow):
         """Fetch one top-level config section as a plain object dict."""
         return self._object_dict(self.config.get(section_name, {}))
 
-    def __init__(self) -> None:
-        super().__init__()
-        configure_qsettings(APP_IDENTITY)
+    def _configure_main_window(self) -> None:
+        """Apply the static window chrome used before runtime initialization."""
         self.setWindowTitle("Prowlarr Search Client")
         self.setGeometry(100, 100, 1400, 800)
         self.setWindowIcon(self._create_globe_icon())
 
-        # Load and validate runtime configuration from the shared settings store.
-        self.config: dict[str, Any] = load_config()
+    def _load_runtime_configuration(self) -> tuple[dict[str, object], list[str]]:
+        """Load config, validate it, and return the settings section plus warnings."""
+        self.config = load_config()
         config_warnings = validate_config(self.config)
-        for w in config_warnings:
-            logger.warning(f"Config: {w}")
+        for warning in config_warnings:
+            logger.warning(f"Config: {warning}")
+        return self._config_section("settings"), config_warnings
 
-        # Get configurable settings
-        settings = self._config_section("settings")
+    def _initialize_runtime_settings(self, settings: Mapping[str, object]) -> None:
+        """Load scalar runtime settings from the validated config."""
         self.title_match_chars = self._int_value(
             settings.get("title_match_chars", 42), 42
         )
@@ -262,7 +263,7 @@ class MainWindow(QMainWindow):
         self.everything_max_results = self._int_value(
             settings.get("everything_max_results", 5), 5
         )
-        self.custom_commands: dict[Qt.Key, str] = {
+        self.custom_commands = {
             Qt.Key.Key_F2: self._text_value(settings.get("custom_command_F2", "")),
             Qt.Key.Key_F3: self._text_value(settings.get("custom_command_F3", "")),
             Qt.Key.Key_F4: self._text_value(settings.get("custom_command_F4", "")),
@@ -271,7 +272,8 @@ class MainWindow(QMainWindow):
             settings.get("everything_batch_size", 10), 10
         )
 
-        # Initialize Prowlarr API client (lightweight - just stores config)
+    def _initialize_service_clients(self, settings: Mapping[str, object]) -> None:
+        """Create lightweight service clients and defer heavyweight ones."""
         try:
             prowlarr_config = self._config_section("prowlarr")
             self.prowlarr = ProwlarrClient(
@@ -290,63 +292,50 @@ class MainWindow(QMainWindow):
                 ),
             )
             logger.info("Prowlarr client initialized")
-        except Exception as e:
-            logger.error(f"Failed to initialize Prowlarr client: {e}")
-            self.prowlarr: ProwlarrClient | None = None
+        except Exception as error:
+            logger.error(f"Failed to initialize Prowlarr client: {error}")
+            self.prowlarr = None
 
-        # Defer Everything search integration to background
-        self.everything: EverythingSearch | None = None
+        self.everything = None
 
-        # UI/runtime preferences share the same canonical config store.
+    def _initialize_preferences(self) -> None:
+        """Create the shared preference store and load persisted UI history."""
         self.preferences_store = QSettingsValueStore.from_identity(
             APP_IDENTITY,
             app_name=SETTINGS_APP_NAME,
         )
-        self.search_history: list[str] = self.preferences_store.get_str_list(
+        self.search_history = self.preferences_store.get_str_list(
             self._pref_key("search_history"),
             [],
         )
 
-        # Current search state
+    def _initialize_runtime_state(self, settings: Mapping[str, object]) -> None:
+        """Initialize runtime bookkeeping used by searches, downloads, and UI."""
         self.current_worker: SearchWorker | None = None
         self.everything_check_worker: EverythingCheckWorker | None = None
         self.download_worker: DownloadWorker | None = None
         self.current_results: list[ReleaseDict] = []
         self.current_offset = 0
         self._video_paths: dict[ReleaseKey, str] = {}
-        self._search_generation = (
-            0  # Incremented on each new search, used to invalidate stale timers
-        )
-        self._everything_check_generation = (
-            0  # Generation when Everything check started
-        )
-        self._pending_everything_check_generation: int | None = (
-            None  # Deferred generation to run after an in-flight check ends
-        )
-        # Deferred targeted recheck payload while another Everything worker is active.
-        self._pending_everything_recheck: DeferredEverythingRecheck | None = (
-            None  # {"title_keys": set[str], "generation": int}
-        )
-        # Composite key avoids collisions when two indexers expose the same GUID.
+        self._search_generation = 0
+        self._everything_check_generation = 0
+        self._pending_everything_check_generation: int | None = None
+        self._pending_everything_recheck: DeferredEverythingRecheck | None = None
         self._downloaded_release_keys: set[ReleaseKey] = set()
         self._downloaded_title_keys: set[str] = set()
         self._release_key_to_row: dict[ReleaseKey, int] = {}
         self._active_spinner_tags: dict[str, int] = {}
         self._table_sort_locks: set[str] = set()
-        self._close_retry_pending = False  # Prevent duplicate close retry scheduling
+        self._close_retry_pending = False
         self._close_retry_timer: QTimer | None = None
         self._shutdown_in_progress = False
         self._shutdown_interrupted_worker_ids: set[int] = set()
-        self._download_queue_retry_limit = (
-            12  # Circuit-breaker for enqueue retry storms
-        )
+        self._download_queue_retry_limit = 12
         self._download_queue_stale_grace_seconds = self._float_value(
             settings.get("download_queue_stale_grace_seconds", 20.0),
             20.0,
         )
-        self._download_queue_owner_since: float | None = (
-            None  # monotonic timestamp when queue ownership became active
-        )
+        self._download_queue_owner_since: float | None = None
         self._shutdown_force_after_seconds = self._float_value(
             settings.get("shutdown_force_after_seconds", 15.0),
             15.0,
@@ -363,50 +352,35 @@ class MainWindow(QMainWindow):
             20.0,
         )
         self._everything_check_owner_since: float | None = None
-        self._indexers_loaded = (
-            False  # True once populate_indexers has restored tree state
-        )
-        self._categories_loaded = (
-            False  # True once populate_categories has restored tree state
-        )
+        self._indexers_loaded = False
+        self._categories_loaded = False
         self._indexers_item_changed_connected = False
         self._categories_item_changed_connected = False
-
-        # Multi-page fetch state
         self._load_all_active = False
         self._load_all_results: list[ReleaseDict] = []
         self._load_all_page = 0
-
-        # Worker tracking for proper cleanup
         self._all_workers: list[WorkerThread] = []
-
-        # Timer tracking for proper cleanup
         self._pending_timers: list[QTimer] = []
+        self._config_dirty = False
+        self._prefs_dirty = False
 
-        # Splitter save timer for debouncing
+    def _initialize_timers(self) -> None:
+        """Create startup timers used for debounced saves and cleanup."""
         self.splitter_save_timer = QTimer()
         self.splitter_save_timer.setSingleShot(True)
         self.splitter_save_timer.timeout.connect(self.save_splitter_sizes)
 
-        # Debounced save timer for config writes and preferences sync.
-        self._config_dirty = False
-        self._prefs_dirty = False
         self.config_save_timer = QTimer()
         self.config_save_timer.setSingleShot(True)
         self.config_save_timer.timeout.connect(self._flush_config_save)
 
-        # Create log window (hidden by default)
-        self.log_window = LogWindow(self)
+    def _log_config_warnings(self, config_warnings: list[str]) -> None:
+        """Mirror config warnings into the in-app log window after UI setup."""
+        for warning in config_warnings:
+            self.log(f"WARNING: {warning}")
 
-        # Build UI components
-        self.setup_ui()
-        self.setup_menu()
-
-        # Show config warnings in log window
-        for w in config_warnings:
-            self.log(f"WARNING: {w}")
-
-        # Initialize heavy components in background thread
+    def _start_background_initialization(self, settings: Mapping[str, object]) -> None:
+        """Start the heavyweight background initialization worker."""
         self.init_worker = InitWorker(
             self.everything_integration_method,
             self.prowlarr,
@@ -414,6 +388,22 @@ class MainWindow(QMainWindow):
         )
         self.init_worker.init_done.connect(self._on_init_done)
         self.init_worker.start()
+
+    def __init__(self) -> None:
+        super().__init__()
+        configure_qsettings(APP_IDENTITY)
+        self._configure_main_window()
+        settings, config_warnings = self._load_runtime_configuration()
+        self._initialize_runtime_settings(settings)
+        self._initialize_service_clients(settings)
+        self._initialize_preferences()
+        self._initialize_runtime_state(settings)
+        self._initialize_timers()
+        self.log_window = LogWindow(self)
+        self.setup_ui()
+        self.setup_menu()
+        self._log_config_warnings(config_warnings)
+        self._start_background_initialization(settings)
 
     @staticmethod
     def _pref_key(name: str) -> str:
