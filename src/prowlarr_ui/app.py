@@ -71,7 +71,12 @@ from threep_commons.settings import QSettingsValueStore
 
 from .api.everything_search import EverythingSearch
 from .api.prowlarr_client import ProwlarrClient
-from .app_results_rendering import render_results_table
+from .app_results_rendering import (
+    build_palette_colors,
+    reapply_result_row_colors,
+    render_results_table,
+    update_results_status,
+)
 from .app_ui_layout import build_center_panel, build_left_panel, setup_main_window_ui
 from .constants import APP_IDENTITY, SETTINGS_APP_NAME
 from .ui.help_text import HELP_HTML
@@ -2750,102 +2755,16 @@ class MainWindow(QMainWindow):
         self._update_status_bar_counts()
 
     def get_palette_colors(self) -> list[QColor]:
-        """
-        Generate 24 distinct light colors for row backgrounds
-        Colors are light but different enough to distinguish groups
-        """
-        return [
-            QColor(255, 230, 230),  # Light red
-            QColor(230, 255, 230),  # Light green
-            QColor(230, 230, 255),  # Light blue
-            QColor(255, 255, 230),  # Light yellow
-            QColor(255, 230, 255),  # Light magenta
-            QColor(230, 255, 255),  # Light cyan
-            QColor(255, 240, 230),  # Light orange
-            QColor(240, 230, 255),  # Light purple
-            QColor(230, 240, 255),  # Light sky blue
-            QColor(255, 255, 240),  # Light cream
-            QColor(240, 255, 230),  # Light lime
-            QColor(255, 230, 240),  # Light pink
-            QColor(245, 245, 255),  # Very light blue
-            QColor(255, 245, 245),  # Very light red
-            QColor(240, 255, 245),  # Light mint
-            QColor(255, 245, 230),  # Light peach
-            QColor(245, 230, 255),  # Light lavender
-            QColor(255, 250, 230),  # Light gold
-            QColor(230, 250, 255),  # Light ice blue
-            QColor(255, 230, 250),  # Light rose
-            QColor(230, 255, 240),  # Light sea green
-            QColor(255, 240, 245),  # Light blush
-            QColor(240, 240, 255),  # Light periwinkle
-            QColor(255, 245, 240),  # Light apricot
-        ]
+        """Return the extracted 24-color palette used for grouped rows."""
+        return build_palette_colors()
 
     def _update_status_bar_counts(self):
-        """Update status bar with current sort criteria and visible/total counts"""
-        total = self.results_table.rowCount()
-        visible = sum(1 for r in range(total) if not self.results_table.isRowHidden(r))
-        header = self.results_table.horizontalHeader()
-        sort_col = header.sortIndicatorSection()
-        sort_order = header.sortIndicatorOrder()
-        if 0 <= sort_col < len(self.COL_HEADERS):
-            direction = "ASC" if sort_order == Qt.SortOrder.AscendingOrder else "DESC"
-            sort_info = f"{self.COL_HEADERS[sort_col]} {direction}"
-        else:
-            sort_info = "default"
-        if visible < total:
-            self.status_label.setText(
-                f"Showing {visible}/{total} results (sorted by {sort_info})"
-            )
-        else:
-            self.status_label.setText(f"{total} results (sorted by {sort_info})")
+        """Update the status bar using the extracted results-view helper."""
+        update_results_status(self)
 
     def reapply_row_colors(self):
-        """
-        Re-apply row background colors after sort
-        Ensures no similar colors appear in adjacent rows
-        """
-        colors = self.get_palette_colors()
-        row_count = self.results_table.rowCount()
-
-        if row_count == 0:
-            return
-
-        # Build list of (row_index, title_key) for current sort order
-        row_data: list[tuple[int, str]] = []
-        for row in range(row_count):
-            title_item = self.results_table.item(row, self.COL_TITLE)
-            if title_item:
-                title = title_item.text()
-                title_key = title[: self.title_match_chars].lower()
-                row_data.append((row, title_key))
-
-        # Assign colors avoiding adjacent duplicates
-        title_to_color: dict[str, QColor] = {}
-        color_index = 0
-        last_color_idx = -1
-
-        for row, title_key in row_data:
-            if title_key not in title_to_color:
-                # Find a color that's different from the last used color
-                attempts = 0
-                while attempts < 24:
-                    candidate_idx = color_index % 24
-                    # Ensure we don't use the same color as the previous row
-                    if candidate_idx != last_color_idx or len(title_to_color) >= 24:
-                        title_to_color[title_key] = colors[candidate_idx]
-                        last_color_idx = candidate_idx
-                        color_index += 1
-                        break
-                    color_index += 1
-                    attempts += 1
-
-            # Apply color to all columns except button column
-            color = title_to_color[title_key]
-            for col in range(self.COL_DOWNLOAD):
-                item = self.results_table.item(row, col)
-                if item:
-                    item.setBackground(color)
+        """Re-apply grouped row colors using the extracted results helper."""
+        reapply_result_row_colors(self)
 
     def _recheck_everything_for_titles(
         self, title_keys: set[str], expected_generation: int | None = None

@@ -16,11 +16,100 @@ if TYPE_CHECKING:
     from .app import MainWindow, ReleaseDict
 
 
+def build_palette_colors() -> list[QColor]:
+    """Return the 24-color palette used to group similar result titles."""
+    return [
+        QColor(255, 230, 230),
+        QColor(230, 255, 230),
+        QColor(230, 230, 255),
+        QColor(255, 255, 230),
+        QColor(255, 230, 255),
+        QColor(230, 255, 255),
+        QColor(255, 240, 230),
+        QColor(240, 230, 255),
+        QColor(230, 240, 255),
+        QColor(255, 255, 240),
+        QColor(240, 255, 230),
+        QColor(255, 230, 240),
+        QColor(245, 245, 255),
+        QColor(255, 245, 245),
+        QColor(240, 255, 245),
+        QColor(255, 245, 230),
+        QColor(245, 230, 255),
+        QColor(255, 250, 230),
+        QColor(230, 250, 255),
+        QColor(255, 230, 250),
+        QColor(230, 255, 240),
+        QColor(255, 240, 245),
+        QColor(240, 240, 255),
+        QColor(255, 245, 240),
+    ]
+
+
+def update_results_status(window: MainWindow) -> None:
+    """Update the status bar with result counts and current sorting."""
+    total = window.results_table.rowCount()
+    visible = sum(
+        1 for row in range(total) if not window.results_table.isRowHidden(row)
+    )
+    header = window.results_table.horizontalHeader()
+    sort_column = header.sortIndicatorSection()
+    sort_order = header.sortIndicatorOrder()
+    if 0 <= sort_column < len(window.COL_HEADERS):
+        direction = "ASC" if sort_order == Qt.SortOrder.AscendingOrder else "DESC"
+        sort_info = f"{window.COL_HEADERS[sort_column]} {direction}"
+    else:
+        sort_info = "default"
+    if visible < total:
+        window.status_label.setText(
+            f"Showing {visible}/{total} results (sorted by {sort_info})"
+        )
+        return
+    window.status_label.setText(f"{total} results (sorted by {sort_info})")
+
+
+def reapply_result_row_colors(window: MainWindow) -> None:
+    """Re-apply title-group colors after sorting changes table order."""
+    colors = build_palette_colors()
+    row_count = window.results_table.rowCount()
+    if row_count == 0:
+        return
+
+    row_data: list[tuple[int, str]] = []
+    for row in range(row_count):
+        title_item = window.results_table.item(row, window.COL_TITLE)
+        if title_item is None:
+            continue
+        title = title_item.text()
+        title_key = title[: window.title_match_chars].lower()
+        row_data.append((row, title_key))
+
+    title_to_color: dict[str, QColor] = {}
+    color_index = 0
+    last_color_index = -1
+
+    for row, title_key in row_data:
+        if title_key not in title_to_color:
+            color_index, last_color_index = _assign_reapply_color(
+                title_key,
+                title_to_color,
+                colors,
+                color_index,
+                last_color_index,
+            )
+
+        color = title_to_color[title_key]
+        for column in range(window.COL_DOWNLOAD):
+            item = window.results_table.item(row, column)
+            if item is not None:
+                item.setBackground(color)
+
+
 def render_results_table(window: MainWindow, results: list[ReleaseDict]) -> None:
     """Populate the results table and restore title-group coloring."""
     _warn_about_large_result_sets(window, len(results))
 
-    colors = window.get_palette_colors()
+    colors = build_palette_colors()
     title_colors: dict[str, QColor] = {}
     color_index = 0
 
@@ -48,6 +137,25 @@ def _warn_about_large_result_sets(window: MainWindow, result_count: int) -> None
         "slowdown. Consider using filters."
     )
     window.status_label.setText(f"Loading {result_count} results (may be slow)...")
+
+
+def _assign_reapply_color(
+    title_key: str,
+    title_to_color: dict[str, QColor],
+    colors: list[QColor],
+    color_index: int,
+    last_color_index: int,
+) -> tuple[int, int]:
+    """Pick a color for one title group while avoiding adjacent duplicates."""
+    attempts = 0
+    while attempts < len(colors):
+        candidate_index = color_index % len(colors)
+        if candidate_index != last_color_index or len(title_to_color) >= len(colors):
+            title_to_color[title_key] = colors[candidate_index]
+            return color_index + 1, candidate_index
+        color_index += 1
+        attempts += 1
+    return color_index, last_color_index
 
 
 def _ensure_title_color(
