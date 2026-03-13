@@ -112,6 +112,42 @@ from .app_results_rendering import (
     update_results_status,
 )
 from .app_ui_layout import build_center_panel, build_left_panel, setup_main_window_ui
+from .app_window_support import (
+    edit_preferences_ini_file as open_preferences_ini_file,
+)
+from .app_window_support import (
+    find_video_file as find_result_video_file,
+)
+from .app_window_support import (
+    get_current_row_title as get_selected_row_title,
+)
+from .app_window_support import (
+    get_video_path_for_row as get_row_video_path,
+)
+from .app_window_support import (
+    open_download_history as open_download_history_file,
+)
+from .app_window_support import (
+    refresh_spinner as refresh_window_spinner,
+)
+from .app_window_support import (
+    start_spinner as start_window_spinner,
+)
+from .app_window_support import (
+    stop_spinner as stop_window_spinner,
+)
+from .app_window_support import (
+    toggle_log_window as toggle_detached_log_window,
+)
+from .app_window_support import (
+    update_download_button_states as refresh_download_button_states,
+)
+from .app_window_support import (
+    update_status as update_window_status,
+)
+from .app_window_support import (
+    write_download_history as append_download_history,
+)
 from .constants import APP_IDENTITY, SETTINGS_APP_NAME
 from .ui.help_text import HELP_HTML
 from .ui.log_window import LogWindow
@@ -3244,113 +3280,30 @@ class MainWindow(QMainWindow):
         Append a download record to the persistent download history log
         Implements automatic log rotation when file exceeds 10 MB
         """
-        try:
-            history_file = DOWNLOAD_HISTORY_PATH
-            max_size = 10 * 1024 * 1024  # 10 MB
-            os.makedirs(os.path.dirname(history_file), exist_ok=True)
-
-            # Check if rotation needed
-            if (
-                os.path.exists(history_file)
-                and os.path.getsize(history_file) > max_size
-            ):
-                # Rotate: .log -> .log.1, .log.1 -> .log.2, etc. (keep 5 files)
-                for i in range(4, 0, -1):
-                    old_file = f"{history_file}.{i}"
-                    new_file = f"{history_file}.{i + 1}"
-                    if os.path.exists(old_file):
-                        os.replace(old_file, new_file)
-                os.replace(history_file, f"{history_file}.1")
-                logger.info(
-                    "Rotated download history log "
-                    f"(exceeded {max_size / 1024 / 1024:.1f} MB)"
-                )
-
-            # Append new record (escape tabs/newlines to preserve TSV format)
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            status = "OK" if success else "FAIL"
-            safe_title = title.replace("\t", " ").replace("\n", " ").replace("\r", "")
-            safe_indexer = (
-                indexer.replace("\t", " ").replace("\n", " ").replace("\r", "")
-            )
-            with open(history_file, "a", encoding="utf-8") as f:
-                f.write(f"{timestamp}\t{status}\t{safe_indexer}\t{safe_title}\n")
-        except Exception as e:
-            logger.error(f"Failed to write download history: {e}")
+        append_download_history(DOWNLOAD_HISTORY_PATH, title, indexer, success)
 
     @safe_slot
     def _open_download_history(self):
         """Open the download history log file (cross-platform)"""
-        history_path = DOWNLOAD_HISTORY_PATH
-        if not os.path.exists(history_path):
-            self.status_label.setText("No download history yet")
-            return
-
-        try:
-            if not open_path_in_default_app(history_path):
-                raise RuntimeError("No default opener available")
-        except Exception as e:
-            logger.error(f"Failed to open file: {e}")
-            self.status_label.setText(f"Cannot open file: {e}")
+        open_download_history_file(
+            self,
+            DOWNLOAD_HISTORY_PATH,
+            open_path_in_default_app,
+        )
 
     @safe_slot
     def _edit_preferences_ini_file(self):
         """Open the user preferences INI file in the system editor."""
-        ini_path = self.preferences_store.file_name()
-        try:
-            # Ensure file exists on disk before opening.
-            self.preferences_store.sync()
-            ini_dir = os.path.dirname(os.path.abspath(ini_path))
-            if ini_dir:
-                os.makedirs(ini_dir, exist_ok=True)
-            if not os.path.exists(ini_path):
-                with open(ini_path, "a", encoding="utf-8"):
-                    pass
-            if not open_path_in_default_app(ini_path):
-                raise RuntimeError("No default opener available")
-        except Exception as e:
-            logger.error(f"Failed to open preferences INI file: {e}")
-            self.status_label.setText(f"Cannot open INI file: {e}")
+        open_preferences_ini_file(self, open_path_in_default_app)
 
     @safe_slot
     def update_download_button_states(self):
         """Enable/disable download buttons based on current table state and selection"""
-
-        def is_row_downloadable(row: int) -> bool:
-            if self.results_table.isRowHidden(row):
-                return False
-            btn = self.results_table.cellWidget(row, self.COL_DOWNLOAD)
-            if not btn:
-                return False
-            guid = btn.property("guid")
-            indexer_id = btn.property("indexerId")
-            if guid is None or indexer_id is None:
-                return False
-            key = (guid, indexer_id)
-            # Only enable actions for rows that are still actionable.
-            return key not in self._downloaded_release_keys
-
-        # Download All: enabled only when at least one visible row is truly actionable.
-        has_visible_downloadable = any(
-            is_row_downloadable(row) for row in range(self.results_table.rowCount())
-        )
-        self.download_all_btn.setEnabled(has_visible_downloadable)
-
-        # Download Selected: enabled only when selected rows include an actionable row.
-        selected_rows = {idx.row() for idx in self.results_table.selectedIndexes()}
-        has_selected_downloadable = any(
-            is_row_downloadable(row) for row in selected_rows
-        )
-        self.download_selected_btn.setEnabled(has_selected_downloadable)
+        refresh_download_button_states(self)
 
     def get_current_row_title(self) -> str | None:
         """Get title from currently selected row"""
-        current_row = self.results_table.currentRow()
-        if current_row >= 0:
-            title_item = self.results_table.item(current_row, self.COL_TITLE)
-            if title_item:
-                return title_item.text()
-        return None
+        return get_selected_row_title(self)
 
     VIDEO_EXTENSIONS: ClassVar[set[str]] = {
         ".mkv",
@@ -3369,27 +3322,11 @@ class MainWindow(QMainWindow):
 
     def _find_video_file(self, everything_results: EverythingMatches) -> str | None:
         """Find the first video file path from Everything search results"""
-        logger.debug(f"_find_video_file: checking {len(everything_results)} results")
-        for i, item in enumerate(everything_results):
-            try:
-                file_path, _size = item
-                _, ext = os.path.splitext(file_path)
-                if ext.lower() in MainWindow.VIDEO_EXTENSIONS:
-                    logger.debug(f"_find_video_file: FOUND at index {i}: {file_path}")
-                    return file_path
-            except Exception as e:
-                logger.warning(
-                    f"_find_video_file: ERROR at index {i}: {e} item={item!r}"
-                )
-        logger.debug("_find_video_file: NO VIDEO FOUND")
-        return None
+        return find_result_video_file(everything_results, self.VIDEO_EXTENSIONS)
 
     def _get_video_path_for_row(self, row: int) -> str | None:
         """Get stored video file path for a row by release identity."""
-        release_key = self._get_release_key_for_row(row)
-        if not release_key:
-            return None
-        return self._video_paths.get(release_key)
+        return get_row_video_path(self._get_release_key_for_row(row), self._video_paths)
 
     @safe_slot
     def _on_cell_double_clicked(self, row: int, _column: int):
@@ -3458,31 +3395,20 @@ class MainWindow(QMainWindow):
 
     def _refresh_spinner(self):
         """Apply spinner state from active operation tags."""
-        if self._active_spinner_tags:
-            self.activity_bar.setRange(0, 0)
-        else:
-            self.activity_bar.setRange(0, 1)
-            self.activity_bar.setValue(1)
+        refresh_window_spinner(self, has_active_tags=bool(self._active_spinner_tags))
 
     def start_spinner(self, tag: str = "default"):
         """Mark an operation as active and show indeterminate spinner."""
-        self._active_spinner_tags[tag] = self._active_spinner_tags.get(tag, 0) + 1
-        self._refresh_spinner()
+        start_window_spinner(self, self._active_spinner_tags, tag)
 
     def stop_spinner(self, tag: str = "default"):
         """Mark an operation as complete and hide spinner when no work remains."""
-        count = self._active_spinner_tags.get(tag, 0)
-        if count <= 1:
-            self._active_spinner_tags.pop(tag, None)
-        else:
-            self._active_spinner_tags[tag] = count - 1
-        self._refresh_spinner()
+        stop_window_spinner(self, self._active_spinner_tags, tag)
 
     @safe_slot
     def update_status(self, message: str):
         """Update status bar message and log"""
-        self.status_label.setText(message)
-        self.log(message)
+        update_window_status(self, message)
 
     def log(self, message: str):
         """Log message to file and log window"""
@@ -3493,10 +3419,7 @@ class MainWindow(QMainWindow):
     @safe_slot
     def toggle_log_window(self):
         """Show or hide the log window"""
-        if self.log_window.isVisible():
-            self.log_window.hide()
-        else:
-            self.log_window.show()
+        toggle_detached_log_window(self)
 
     def _cancel_close_retry_timer(self):
         """Stop pending close-retry timer if one exists."""
