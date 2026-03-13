@@ -336,7 +336,8 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         if val < min_val or val > max_val:
             clamped = max(min_val, min(max_val, val))
             warnings.append(
-                f"settings.{key} = {val} out of range [{min_val}-{max_val}], clamped to {clamped}"
+                f"settings.{key} = {val} out of range "
+                f"[{min_val}-{max_val}], clamped to {clamped}"
             )
             settings[key] = clamped
 

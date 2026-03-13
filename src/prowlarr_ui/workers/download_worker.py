@@ -50,7 +50,7 @@ class DownloadWorker(QThread):
         self._queued_keys: set[tuple[str, int]] = set()
         self._accepting_new_items = True
         self.items: list[dict[str, object]] = []
-        # Normalize initial queue to unique items so duplicates are never processed twice.
+        # Normalize the initial queue so duplicates are never processed twice.
         for item in items:
             key = self._item_key(item)
             if key in self._queued_keys:
@@ -130,7 +130,8 @@ class DownloadWorker(QThread):
                     guid, indexer_id, should_cancel=self.isInterruptionRequested
                 )
                 try:
-                    # Emit composite identity to disambiguate duplicate GUIDs across indexers.
+                    # Emit composite identity to disambiguate duplicate GUIDs
+                    # across indexers.
                     self.item_downloaded.emit(guid, indexer_id, success)
                 except Exception as e:
                     logger.error(f"Failed to emit item_downloaded signal: {e}")

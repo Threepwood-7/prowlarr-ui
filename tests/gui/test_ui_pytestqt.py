@@ -83,7 +83,7 @@ def test_start_download_queue_dedupes_initial_items_and_progress(
             captured["items"] = list(items)
 
         def start(self):
-            # Keep the test deterministic; we only validate enqueue payload/progress sizing here.
+            # Keep the test deterministic; only validate queue payload sizing.
             return
 
     monkeypatch.setattr(mocked_main, "DownloadWorker", FakeDownloadWorker)

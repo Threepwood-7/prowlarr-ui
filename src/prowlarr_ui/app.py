@@ -422,7 +422,8 @@ class MainWindow(QMainWindow):
             self._pref_key("search_history"),
             list(self.search_history),
         )
-        # Avoid wiping saved selection when close occurs before async init populates trees.
+        # Avoid wiping saved selection when close occurs before async init
+        # populates trees.
         if self._indexers_loaded:
             self.preferences_store.set_value(
                 self._pref_key("selected_indexers"),
@@ -665,7 +666,8 @@ class MainWindow(QMainWindow):
 
         search_layout.addWidget(self.query_input)
         self.query_input.setToolTip(
-            "Enter a search term and press Enter to search Prowlarr indexers\nPress Down or Enter when empty to browse search history"
+            "Enter a search term and press Enter to search Prowlarr indexers\n"
+            "Press Down or Enter when empty to browse search history"
         )
 
         # Search buttons
@@ -757,7 +759,8 @@ class MainWindow(QMainWindow):
         self.categories_tree.setModel(self.categories_model)
         self.categories_tree.setHeaderHidden(True)
         self.categories_tree.setToolTip(
-            "Filter results by category (Movies, TV, Audio, etc.)\nUse 'All' to toggle all at once"
+            "Filter results by category (Movies, TV, Audio, etc.)\n"
+            "Use 'All' to toggle all at once"
         )
         filters_layout.addWidget(self.categories_tree, 2)  # stretch=2
 
@@ -1103,7 +1106,8 @@ class MainWindow(QMainWindow):
                 self.log("Everything integration disabled")
             else:
                 self.log(
-                    f"Everything search integration initialized (method: {self.everything_integration_method})"
+                    "Everything search integration initialized "
+                    f"(method: {self.everything_integration_method})"
                 )
 
         if error:
@@ -1637,7 +1641,8 @@ class MainWindow(QMainWindow):
 
     def _is_download_queue_active(self) -> bool:
         """
-        Central gate to prevent row/state mutations while download queue ownership is active.
+        Central gate to prevent row/state mutations while download queue
+        ownership is active.
         Includes stale-owner watchdog so missing queue_done cannot block UI forever.
         """
         worker = self.download_worker
@@ -1731,7 +1736,9 @@ class MainWindow(QMainWindow):
         else:
             category_info = "none"
         self.log(
-            f"Starting search: query='{query}', page_size={self.prowlarr_page_size}, indexers={indexer_info}, categories={category_info}"
+            f"Starting search: query='{query}', "
+            f"page_size={self.prowlarr_page_size}, "
+            f"indexers={indexer_info}, categories={category_info}"
         )
 
         # Disable download buttons and reset progress bar
@@ -1802,7 +1809,8 @@ class MainWindow(QMainWindow):
         """Start fetching all pages of results sequentially"""
         if self._block_if_shutting_down():
             return
-        # Prevent Load All from clearing/replacing rows while the download queue is in flight.
+        # Prevent Load All from clearing or replacing rows while the
+        # download queue is in flight.
         if self._is_download_queue_active():
             self.status_label.setText("Cannot load pages while downloads are running")
             return
@@ -1815,7 +1823,8 @@ class MainWindow(QMainWindow):
                     self.current_worker.requestInterruption()
                 except Exception as e:
                     logger.debug(f"Failed to interrupt Load All worker: {e}")
-            # Prevent stale worker ownership in case a replacement search starts immediately.
+            # Prevent stale worker ownership if a replacement search starts
+            # immediately.
             self.current_worker = None
             self.search_btn.setEnabled(True)
             self.load_all_btn.setText("Load A&ll")
@@ -1994,7 +2003,8 @@ class MainWindow(QMainWindow):
         offset = (page_number - 1) * self.prowlarr_page_size
 
         self.log(
-            f"Fetching page {page_number} (offset: {offset}, page size: {self.prowlarr_page_size})"
+            f"Fetching page {page_number} "
+            f"(offset: {offset}, page size: {self.prowlarr_page_size})"
         )
 
         # Clear previous results
@@ -2061,6 +2071,446 @@ class MainWindow(QMainWindow):
             # Prune finished workers to prevent memory leak
             self._all_workers = [w for w in self._all_workers if _safe_is_running(w)]
             self._all_workers.append(worker)
+
+    @staticmethod
+    def _download_worker_running(worker: DownloadWorker | None) -> bool:
+        """Return True when the download worker is alive and accepting commands."""
+        try:
+            return bool(worker and hasattr(worker, "isRunning") and worker.isRunning())
+        except Exception:
+            return False
+
+    def _normalize_download_queue_items(
+        self,
+        items: list[ReleaseDict],
+    ) -> list[ReleaseDict]:
+        """Deduplicate queue items by stable release identity."""
+        deduped_items: list[ReleaseDict] = []
+        seen_keys: set[ReleaseKey] = set()
+        for item in items:
+            key = (
+                self._text_value(item.get("guid", "")),
+                self._int_value(item.get("indexer_id"), -1),
+            )
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped_items.append(item)
+        return deduped_items
+
+    def _schedule_download_queue_retry(
+        self,
+        items: list[ReleaseDict],
+        retry_attempt: int,
+        reason: str,
+    ) -> None:
+        """Retry queue startup with bounded backoff while shutdown completes."""
+        next_attempt = retry_attempt + 1
+        if next_attempt > self._download_queue_retry_limit:
+            if not self._download_worker_running(self.download_worker):
+                self.log(
+                    "Download queue owner appears stale; resetting ownership and "
+                    "retrying enqueue"
+                )
+                self._clear_download_queue_ownership()
+                self.start_download_queue(list(items), 0)
+                return
+            self.log(
+                "Download queue retry limit reached while worker is still shutting down"
+            )
+            self.status_label.setText(
+                "Queue is busy shutting down; please retry in a moment"
+            )
+            return
+
+        delay_ms = min(1000, 100 * (2 ** min(retry_attempt, 3)))
+        self.log(
+            f"{reason} (retry {next_attempt}/{self._download_queue_retry_limit} "
+            f"in {delay_ms}ms)"
+        )
+        self.status_label.setText("Queue finishing, retrying enqueue...")
+        pending_items = list(items)
+
+        def retry_pending_queue() -> None:
+            self.start_download_queue(pending_items, next_attempt)
+
+        self._schedule_timer(delay_ms, retry_pending_queue)
+
+    def _map_release_items_to_rows(self, items: list[ReleaseDict]) -> None:
+        """Update stable release-key to row mappings for queue operations."""
+        for item in items:
+            item_guid = self._text_value(item.get("guid", ""), "")
+            item_indexer_id = self._int_value(item.get("indexer_id"), -1)
+            for row in range(self.results_table.rowCount()):
+                btn = self.results_table.cellWidget(row, self.COL_DOWNLOAD)
+                if (
+                    btn
+                    and self._text_value(btn.property("guid"), "") == item_guid
+                    and self._int_value(btn.property("indexerId"), -1)
+                    == item_indexer_id
+                ):
+                    self._release_key_to_row[(item_guid, item_indexer_id)] = row
+                    break
+
+    def _append_items_to_download_queue(
+        self,
+        items: list[ReleaseDict],
+        retry_attempt: int,
+    ) -> bool:
+        """Append items to an active queue worker when possible."""
+        if self.download_worker is None:
+            return False
+        add_items = getattr(self.download_worker, "add_items", None)
+        if not callable(add_items):
+            self._schedule_download_queue_retry(
+                items,
+                retry_attempt,
+                "Download worker is not ready to accept new items yet",
+            )
+            return True
+        queue_add_items = cast(
+            "Callable[[list[ReleaseDict]], list[ReleaseDict] | None]",
+            add_items,
+        )
+
+        try:
+            added_items = queue_add_items(items)
+        except Exception as e:
+            logger.warning(f"Download queue add_items failed: {e}")
+            if self._is_deleted_qt_wrapper_error(
+                e
+            ) or not self._download_worker_running(self.download_worker):
+                self.log(
+                    "Download queue owner became invalid; resetting ownership and "
+                    "retrying enqueue"
+                )
+                self._clear_download_queue_ownership()
+                self.start_download_queue(list(items), 0)
+                return True
+            self._schedule_download_queue_retry(
+                items,
+                retry_attempt,
+                "Download queue enqueue failed while worker is active",
+            )
+            return True
+        if added_items is None:
+            self._schedule_download_queue_retry(
+                items,
+                retry_attempt,
+                "Download queue is finishing",
+            )
+            return True
+        added = len(added_items)
+        if added == 0:
+            self.status_label.setText("All selected items are already queued")
+            return True
+
+        self.download_progress.setMaximum(self.download_progress.maximum() + added)
+        self._map_release_items_to_rows(added_items)
+        self.log(f"Added {added} item(s) to download queue")
+        self.status_label.setText(f"Added {added} item(s) to download queue")
+        return True
+
+    def _prepare_new_download_queue(self, items: list[ReleaseDict]) -> int:
+        """Prepare UI state and row mappings for a fresh download queue worker."""
+        total = len(items)
+        self.log(f"Starting download queue: {total} item(s)")
+        self.download_progress.setMaximum(total)
+        self.download_progress.setValue(0)
+        self._acquire_table_sort_lock("download")
+        self.search_btn.setEnabled(False)
+        self._downloaded_title_keys = set()
+        self._release_key_to_row = {}
+        self._map_release_items_to_rows(items)
+        return total
+
+    def _create_download_worker(
+        self,
+        client: ProwlarrClient,
+        items: list[ReleaseDict],
+    ) -> DownloadWorker | None:
+        """Create, wire, and start a download queue worker."""
+        try:
+            worker = DownloadWorker(client, items)
+        except Exception as e:
+            logger.error(f"Failed to create download worker: {e}")
+            self._clear_download_queue_ownership()
+            self.status_label.setText(f"Failed to start downloads: {e}")
+            return None
+        self.download_worker = worker
+        self._download_queue_owner_since = time.monotonic()
+        self._track_worker(worker)
+        worker.progress.connect(self._download_progress_callback(worker))
+        worker.item_downloaded.connect(self._download_item_callback(worker))
+        worker.queue_done.connect(self._download_done_callback(worker))
+        try:
+            worker.start()
+        except Exception as e:
+            logger.error(f"Failed to start download worker: {e}")
+            self._clear_download_queue_ownership()
+            self.status_label.setText(f"Failed to start downloads: {e}")
+            return None
+        return worker
+
+    def _collect_recheck_results(
+        self,
+        title_keys: set[str],
+    ) -> list[ReleaseDict]:
+        """Collect lightweight Everything recheck payloads for matching titles."""
+        recheck_results: list[ReleaseDict] = []
+        for check_row in range(self.results_table.rowCount()):
+            check_title_item = self.results_table.item(check_row, self.COL_TITLE)
+            if not check_title_item:
+                continue
+            check_title = check_title_item.text()
+            check_title_key = check_title[: self.title_match_chars].lower()
+            if check_title_key in title_keys:
+                recheck_results.append({"title": check_title})
+        return recheck_results
+
+    def _recheck_title_map(
+        self,
+        recheck_results: list[ReleaseDict],
+    ) -> dict[int, str]:
+        """Map worker row indexes back to release titles for recheck batches."""
+        return {
+            index: self._text_value(result["title"], "Unknown")
+            for index, result in enumerate(recheck_results)
+        }
+
+    def _snapshot_title_rows(self) -> dict[str, list[int]]:
+        """Snapshot current table rows grouped by full title text."""
+        title_to_rows: dict[str, list[int]] = {}
+        for row in range(self.results_table.rowCount()):
+            item = self.results_table.item(row, self.COL_TITLE)
+            if not item:
+                continue
+            title_to_rows.setdefault(item.text(), []).append(row)
+        return title_to_rows
+
+    def _remap_recheck_batch(
+        self,
+        batch: EverythingBatch,
+        recheck_title_map: dict[int, str],
+        title_to_rows: dict[str, list[int]],
+        sender_worker: EverythingCheckWorker,
+    ) -> EverythingBatch:
+        """Remap Everything worker row indexes back to live table rows."""
+        if sender_worker is not self.everything_check_worker:
+            return []
+        remapped: EverythingBatch = []
+        seen_rows: set[int] = set()
+        for idx, results in batch:
+            title = recheck_title_map.get(idx)
+            if title is None:
+                logger.warning(f"Recheck batch index {idx} not in title map")
+                continue
+            for row in title_to_rows.get(title, []):
+                if row in seen_rows:
+                    continue
+                remapped.append((row, results))
+                seen_rows.add(row)
+        return remapped
+
+    def _create_recheck_worker(
+        self,
+        recheck_results: list[ReleaseDict],
+    ) -> EverythingCheckWorker | None:
+        """Create and register an Everything recheck worker for the given rows."""
+        everything = self.everything
+        if everything is None:
+            self._release_table_sort_lock("everything")
+            return None
+        try:
+            worker = EverythingCheckWorker(
+                everything,
+                recheck_results,
+                self.title_match_chars,
+                self.everything_search_chars,
+                self.everything_batch_size,
+            )
+        except Exception as e:
+            logger.error(f"Failed to create recheck worker: {e}")
+            self._release_table_sort_lock("everything")
+            return None
+        self.everything_check_worker = worker
+        self._everything_check_owner_since = time.monotonic()
+        self._track_worker(worker)
+        return worker
+
+    def _request_worker_interrupt(
+        self,
+        worker: WorkerThread | None,
+        name: str,
+    ) -> None:
+        """Request cooperative interruption for a tracked worker."""
+        if not worker:
+            return
+        try:
+            worker.requestInterruption()
+        except Exception as e:
+            logger.debug(f"Failed to request interruption for {name}: {e}")
+
+    @staticmethod
+    def _worker_is_running(worker: WorkerThread | None) -> bool:
+        """Return True when the worker still reports a running thread."""
+        try:
+            return bool(worker and worker.isRunning())
+        except Exception:
+            return False
+
+    def _force_stop_worker(self, worker: WorkerThread | None, name: str) -> None:
+        """Force-stop a worker after cooperative interruption failed."""
+        if not worker:
+            return
+        self._request_worker_interrupt(worker, name)
+        try:
+            worker.terminate()
+        except Exception as e:
+            logger.debug(f"Failed to terminate {name}: {e}")
+        try:
+            worker.wait(250)
+        except Exception as e:
+            logger.debug(f"Failed forced wait for {name}: {e}")
+
+    def _tracked_named_workers(self) -> list[tuple[str, WorkerThread | None]]:
+        """Return the named worker fields that participate in close handling."""
+        return [
+            ("InitWorker", self.init_worker),
+            ("SearchWorker", self.current_worker),
+            ("EverythingCheckWorker", self.everything_check_worker),
+            ("DownloadWorker", self.download_worker),
+        ]
+
+    def _interrupt_worker_once_if_running(
+        self,
+        worker: WorkerThread | None,
+        name: str,
+    ) -> None:
+        """Request interruption once per worker identity during shutdown."""
+        if not self._worker_is_running(worker):
+            return
+        worker_id = id(worker)
+        if worker_id in self._shutdown_interrupted_worker_ids:
+            return
+        self._request_worker_interrupt(worker, name)
+        self._shutdown_interrupted_worker_ids.add(worker_id)
+
+    def _interrupt_all_tracked_workers(
+        self,
+        tracked_named_workers: list[tuple[str, WorkerThread | None]],
+    ) -> None:
+        """Interrupt named workers and additional tracked workers."""
+        for name, worker in tracked_named_workers:
+            self._interrupt_worker_once_if_running(worker, name)
+        for worker in self._all_workers:
+            self._interrupt_worker_once_if_running(worker, type(worker).__name__)
+
+    def _collect_running_workers_for_close(
+        self,
+        tracked_named_workers: list[tuple[str, WorkerThread | None]],
+        *,
+        wait_ms: int,
+    ) -> list[tuple[str, WorkerThread]]:
+        """Collect currently running workers after an optional lightweight wait."""
+        seen_workers: set[int] = set()
+        still_running: list[tuple[str, WorkerThread]] = []
+        for name, worker in tracked_named_workers:
+            if not worker:
+                continue
+            seen_workers.add(id(worker))
+            if wait_ms > 0:
+                try:
+                    worker.wait(wait_ms)
+                except Exception as e:
+                    logger.debug(f"Failed lightweight wait for {name}: {e}")
+            if self._worker_is_running(worker):
+                still_running.append((name, worker))
+        for worker in self._all_workers:
+            if not worker or id(worker) in seen_workers:
+                continue
+            if wait_ms > 0:
+                try:
+                    worker.wait(wait_ms)
+                except Exception as e:
+                    logger.debug(f"Failed lightweight wait for tracked worker: {e}")
+            if self._worker_is_running(worker):
+                still_running.append((type(worker).__name__, worker))
+        return still_running
+
+    def _handle_force_close_workers(
+        self,
+        still_running: list[tuple[str, WorkerThread]],
+        event: QCloseEvent,
+    ) -> bool:
+        """Try force-stopping workers and return True when close must abort."""
+        unresolved: list[str] = []
+        force_seen: set[int] = set()
+        for name, worker in still_running:
+            worker_id = id(worker)
+            if worker_id in force_seen:
+                continue
+            force_seen.add(worker_id)
+            self._force_stop_worker(worker, name)
+            if self._worker_is_running(worker):
+                unresolved.append(name)
+
+        unresolved = sorted(set(unresolved))
+        if not unresolved:
+            return False
+        force_msg = (
+            "Close aborted: workers still running after force-stop attempt: "
+            + ", ".join(unresolved)
+        )
+        logger.error(force_msg)
+        if hasattr(self, "status_label"):
+            self.status_label.setText(force_msg)
+        self._shutdown_in_progress = False
+        self._shutdown_started_monotonic = None
+        self._shutdown_force_prompted = False
+        self._shutdown_force_armed_until = None
+        self._shutdown_interrupted_worker_ids.clear()
+        self.stop_spinner("shutdown")
+        self._cancel_close_retry_timer()
+        event.ignore()
+        return True
+
+    def _handle_graceful_close_wait(
+        self,
+        event: QCloseEvent,
+    ) -> bool:
+        """Handle the graceful close retry/force-arm flow."""
+        self._shutdown_in_progress = True
+        if "shutdown" not in self._active_spinner_tags:
+            self.start_spinner("shutdown")
+        elapsed = 0.0
+        if self._shutdown_started_monotonic is not None:
+            elapsed = max(0.0, time.monotonic() - self._shutdown_started_monotonic)
+        if elapsed >= self._shutdown_force_after_seconds:
+            arm_seconds = max(1.0, self._shutdown_force_arm_seconds)
+            self._shutdown_force_prompted = True
+            self._shutdown_force_armed_until = time.monotonic() + arm_seconds
+            prompt = (
+                "Background tasks did not stop after "
+                f"{self._shutdown_force_after_seconds:.0f}s. "
+                f"Close again within {arm_seconds:.0f}s to force stop."
+            )
+            logger.error(prompt)
+            if hasattr(self, "status_label"):
+                self.status_label.setText(prompt)
+            self._shutdown_in_progress = False
+            self._shutdown_started_monotonic = None
+            self._shutdown_interrupted_worker_ids.clear()
+            self.stop_spinner("shutdown")
+            self._cancel_close_retry_timer()
+            event.ignore()
+            return True
+
+        if not self._close_retry_pending:
+            self._close_retry_pending = True
+            self._close_retry_timer = self._schedule_timer(250, self._retry_close)
+        event.ignore()
+        return True
 
     def _save_config_with_retry(self) -> bool:
         """
@@ -2141,7 +2591,8 @@ class MainWindow(QMainWindow):
             return False
 
         logger.warning(
-            f"{name} did not stop within {timeout_ms}ms (cooperative cancellation timed out)"
+            f"{name} did not stop within {timeout_ms}ms "
+            "(cooperative cancellation timed out)"
         )
         return False
 
@@ -2245,10 +2696,12 @@ class MainWindow(QMainWindow):
         if self._load_all_active:
             self._load_all_results.extend(results)
             self.log(
-                f"Load All: page {self._load_all_page} returned {len(results)} results (total: {len(self._load_all_results)})"
+                f"Load All: page {self._load_all_page} returned {len(results)} "
+                f"results (total: {len(self._load_all_results)})"
             )
             self.status_label.setText(
-                f"Loading... page {self._load_all_page}, {len(self._load_all_results)} results so far"
+                f"Loading... page {self._load_all_page}, "
+                f"{len(self._load_all_results)} results so far"
             )
 
             if len(results) >= self.prowlarr_page_size:
@@ -2267,7 +2720,8 @@ class MainWindow(QMainWindow):
                 results = self._load_all_results
                 self._load_all_results = []
                 self.log(
-                    f"Load All: complete, {len(results)} total results across {self._load_all_page} pages"
+                    f"Load All: complete, {len(results)} total results "
+                    f"across {self._load_all_page} pages"
                 )
         else:
             # Cancelled or single-page: show accumulated results if any
@@ -2276,7 +2730,8 @@ class MainWindow(QMainWindow):
                 results = self._load_all_results
                 self._load_all_results = []
                 self.log(
-                    f"Load All: cancelled, showing {len(results)} results from {self._load_all_page} pages"
+                    f"Load All: cancelled, showing {len(results)} results "
+                    f"from {self._load_all_page} pages"
                 )
 
         self.search_btn.setEnabled(True)
@@ -2290,7 +2745,8 @@ class MainWindow(QMainWindow):
         self.current_results = results
 
         self.log(
-            f"Page {self.prowlarr_page_number_spinbox.value()}: Received {len(results)} results in {elapsed:.1f}s"
+            f"Page {self.prowlarr_page_number_spinbox.value()}: "
+            f"Received {len(results)} results in {elapsed:.1f}s"
         )
         self.display_results(results)
         self._restore_column_widths()
@@ -2413,7 +2869,8 @@ class MainWindow(QMainWindow):
         if not self.everything or not self.current_results:
             return
 
-        # Treat worker ownership as active until check_done clears everything_check_worker.
+        # Treat worker ownership as active until check_done clears
+        # everything_check_worker.
         if self._is_everything_check_active():
             if self._everything_check_generation != self._search_generation:
                 self._pending_everything_check_generation = self._search_generation
@@ -2475,7 +2932,8 @@ class MainWindow(QMainWindow):
             # Make text dark gray
             title_item.setForeground(QColor(128, 128, 128))
 
-            # Set tooltip with found results (FileName - Size), limited to configured max
+            # Set tooltip with found results (FileName - Size), limited to
+            # the configured maximum.
             # Get release size for comparison
             size_item = self.results_table.item(row, self.COL_SIZE)
             release_size = (
@@ -2543,7 +3001,8 @@ class MainWindow(QMainWindow):
         if finished_generation == self._search_generation:
             self.apply_result_filters()
 
-        # If a newer generation requested a check while this worker was active, run it now.
+        # If a newer generation requested a check while this worker was
+        # active, run it now.
         pending_gen = self._pending_everything_check_generation
         if pending_gen is not None:
             self._pending_everything_check_generation = None
@@ -2726,91 +3185,35 @@ class MainWindow(QMainWindow):
             self.log("Deferring recheck (Everything worker still running)")
             return
 
-        # Collect rows matching any of the title groups
-        recheck_results: list[ReleaseDict] = []
-        for check_row in range(self.results_table.rowCount()):
-            check_title_item = self.results_table.item(check_row, self.COL_TITLE)
-            if check_title_item:
-                check_title = check_title_item.text()
-                check_title_key = check_title[: self.title_match_chars].lower()
-                if check_title_key in title_keys:
-                    recheck_results.append({"title": check_title})
-
+        recheck_results = self._collect_recheck_results(title_keys)
         if not recheck_results:
             return
 
         self.log(
-            f"Re-checking Everything for {len(recheck_results)} rows across {len(title_keys)} title groups..."
+            f"Re-checking Everything for {len(recheck_results)} rows across "
+            f"{len(title_keys)} title groups..."
         )
 
-        # Hold Everything sort lock so row indices remain stable during recheck lifecycle.
         self._acquire_table_sort_lock("everything")
-
-        # Tag with generation for stale batch detection
         self._everything_check_generation = self._search_generation
-
-        # Run recheck on background worker
-        everything = self.everything
-        if everything is None:
-            self._release_table_sort_lock("everything")
+        worker = self._create_recheck_worker(recheck_results)
+        if worker is None:
             return
-
-        try:
-            worker = EverythingCheckWorker(
-                everything,
-                recheck_results,
-                self.title_match_chars,
-                self.everything_search_chars,
-                self.everything_batch_size,
-            )
-        except Exception as e:
-            logger.error(f"Failed to create recheck worker: {e}")
-            self._release_table_sort_lock("everything")
-            return
-        self.everything_check_worker = worker
-        self._everything_check_owner_since = time.monotonic()
-        self._track_worker(worker)
-
-        # Build title -> worker index map for resolving rows at batch delivery time
-        recheck_title_map: dict[int, str] = {}
-        for i, result in enumerate(recheck_results):
-            recheck_title_map[i] = self._text_value(result["title"], "Unknown")
-
-        # Snapshot every current row for each title so duplicate titles are all updated.
-        title_to_rows: dict[str, list[int]] = {}
-        for r in range(self.results_table.rowCount()):
-            item = self.results_table.item(r, self.COL_TITLE)
-            if not item:
-                continue
-            title_to_rows.setdefault(item.text(), []).append(r)
-
-        # Remap worker row indices to actual table rows by title lookup (sort-safe)
-        def on_recheck_batch(
-            batch: EverythingBatch, sender_worker: EverythingCheckWorker
-        ) -> None:
-            try:
-                if sender_worker is not self.everything_check_worker:
-                    return
-                remapped: EverythingBatch = []
-                seen_rows: set[int] = set()
-                for idx, results in batch:
-                    title = recheck_title_map.get(idx)
-                    if title is None:
-                        logger.warning(f"Recheck batch index {idx} not in title map")
-                        continue
-                    # Update all rows sharing the same title, not just the first one.
-                    for r in title_to_rows.get(title, []):
-                        if r in seen_rows:
-                            continue
-                        remapped.append((r, results))
-                        seen_rows.add(r)
-                if remapped:
-                    self.on_everything_batch_ready(remapped, sender_worker)
-            except Exception as e:
-                logger.error(f"Error in on_recheck_batch: {e}")
+        recheck_title_map = self._recheck_title_map(recheck_results)
+        title_to_rows = self._snapshot_title_rows()
 
         def handle_recheck_batch(batch: EverythingBatch) -> None:
-            on_recheck_batch(batch, worker)
+            try:
+                remapped = self._remap_recheck_batch(
+                    batch,
+                    recheck_title_map,
+                    title_to_rows,
+                    worker,
+                )
+                if remapped:
+                    self.on_everything_batch_ready(remapped, worker)
+            except Exception as e:
+                logger.error(f"Error in on_recheck_batch: {e}")
 
         worker.batch_ready.connect(handle_recheck_batch)
         worker.check_done.connect(self._everything_done_callback(worker))
@@ -2908,7 +3311,8 @@ class MainWindow(QMainWindow):
         # Warn user about large result sets that may cause UI slowdown
         if len(results) > 5000:
             self.log(
-                f"WARNING: Displaying {len(results)} results may cause UI slowdown. Consider using filters."
+                f"WARNING: Displaying {len(results)} results may cause UI "
+                "slowdown. Consider using filters."
             )
             self.status_label.setText(
                 f"Loading {len(results)} results (may be slow)..."
@@ -3016,7 +3420,8 @@ class MainWindow(QMainWindow):
             self.results_table.setCellWidget(row, self.COL_DOWNLOAD, download_btn)
 
             # Apply background color to row (same color for same title group)
-            # Re-apply downloaded state (dark red text) if GUID was previously downloaded
+            # Re-apply downloaded state (dark red text) if the GUID was
+            # previously downloaded.
             release_key = (guid, indexer_id)
             is_downloaded = (
                 bool(guid)
@@ -3097,7 +3502,7 @@ class MainWindow(QMainWindow):
 
     @safe_slot
     def download_all(self) -> None:
-        """Download all visible (non-hidden, non-downloaded) releases in the table via the background queue"""
+        """Download all visible, non-downloaded releases in the table."""
         items: list[ReleaseDict] = []
         for row in range(self.results_table.rowCount()):
             if self.results_table.isRowHidden(row):
@@ -3119,7 +3524,7 @@ class MainWindow(QMainWindow):
 
     @safe_slot
     def select_best_per_group(self):
-        """Select the best release per title group (highest seeders, fallback largest size)"""
+        """Select the best release per title group."""
         self.results_table.clearSelection()
         groups: dict[str, tuple[int, float, int]] = {}
 
@@ -3169,7 +3574,7 @@ class MainWindow(QMainWindow):
     def start_download_queue(
         self, items: list[ReleaseDict], retry_attempt: int = 0
     ) -> None:
-        """Start background download worker with a list of items, or append to running queue"""
+        """Start or append to the background download queue."""
         if self._block_if_shutting_down():
             return
         client = self.prowlarr
@@ -3177,172 +3582,16 @@ class MainWindow(QMainWindow):
             self.status_label.setText("Prowlarr client not initialized")
             return
 
-        def _is_worker_running(worker: DownloadWorker | None) -> bool:
-            try:
-                return bool(
-                    worker and hasattr(worker, "isRunning") and worker.isRunning()
-                )
-            except Exception:
-                return False
-
-        def _retry_enqueue(reason: str) -> None:
-            next_attempt = retry_attempt + 1
-            if next_attempt > self._download_queue_retry_limit:
-                if not _is_worker_running(self.download_worker):
-                    # If ownership is stale, drop it and retry once with a fresh worker.
-                    self.log(
-                        "Download queue owner appears stale; resetting ownership and retrying enqueue"
-                    )
-                    self._clear_download_queue_ownership()
-                    self.start_download_queue(list(items), 0)
-                    return
-                self.log(
-                    "Download queue retry limit reached while worker is still shutting down"
-                )
-                self.status_label.setText(
-                    "Queue is busy shutting down; please retry in a moment"
-                )
-                return
-
-            delay_ms = min(1000, 100 * (2 ** min(retry_attempt, 3)))
-            self.log(
-                f"{reason} (retry {next_attempt}/{self._download_queue_retry_limit} in {delay_ms}ms)"
-            )
-            self.status_label.setText("Queue finishing, retrying enqueue...")
-            pending_items = list(items)
-
-            def retry_pending_queue() -> None:
-                self.start_download_queue(pending_items, next_attempt)
-
-            self._schedule_timer(delay_ms, retry_pending_queue)
-
-        # Normalize this request to unique release keys so progress totals stay accurate.
-        deduped_items: list[ReleaseDict] = []
-        seen_keys: set[ReleaseKey] = set()
-        for item in items:
-            key = (
-                self._text_value(item.get("guid", "")),
-                self._int_value(item.get("indexer_id"), -1),
-            )
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-            deduped_items.append(item)
-        items = deduped_items
+        items = self._normalize_download_queue_items(items)
         if not items:
             self.status_label.setText("No new items to queue")
             return
 
-        # While a queue worker object exists, treat it as authoritative until queue_done clears it.
-        if self.download_worker is not None:
-            add_items = getattr(self.download_worker, "add_items", None)
-            if not callable(add_items):
-                _retry_enqueue("Download worker is not ready to accept new items yet")
-                return
-            queue_add_items = cast(
-                "Callable[[list[ReleaseDict]], list[ReleaseDict] | None]",
-                add_items,
-            )
-
-            try:
-                added_items = queue_add_items(items)
-            except Exception as e:
-                logger.warning(f"Download queue add_items failed: {e}")
-                if self._is_deleted_qt_wrapper_error(e) or not _is_worker_running(
-                    self.download_worker
-                ):
-                    self.log(
-                        "Download queue owner became invalid; resetting ownership and retrying enqueue"
-                    )
-                    self._clear_download_queue_ownership()
-                    self.start_download_queue(list(items), 0)
-                    return
-                _retry_enqueue("Download queue enqueue failed while worker is active")
-                return
-            if added_items is None:
-                # Worker has already entered shutdown; retry enqueue with bounded backoff.
-                _retry_enqueue("Download queue is finishing")
-                return
-            added = len(added_items)
-            if added == 0:
-                self.status_label.setText("All selected items are already queued")
-                return
-
-            # Update progress bar maximum to include new items
-            self.download_progress.setMaximum(self.download_progress.maximum() + added)
-
-            # Extend GUID → row mapping for new items
-            for item in added_items:
-                item_guid = self._text_value(item["guid"], "")
-                item_indexer_id = self._int_value(item["indexer_id"], -1)
-                for r in range(self.results_table.rowCount()):
-                    btn = self.results_table.cellWidget(r, self.COL_DOWNLOAD)
-                    if (
-                        btn
-                        and self._text_value(btn.property("guid"), "") == item_guid
-                        and self._int_value(btn.property("indexerId"), -1)
-                        == item_indexer_id
-                    ):
-                        self._release_key_to_row[(item_guid, item_indexer_id)] = r
-                        break
-
-            self.log(f"Added {added} item(s) to download queue")
-            self.status_label.setText(f"Added {added} item(s) to download queue")
+        if self._append_items_to_download_queue(items, retry_attempt):
             return
 
-        total = len(items)
-        self.log(f"Starting download queue: {total} item(s)")
-
-        # Configure progress bar
-        self.download_progress.setMaximum(total)
-        self.download_progress.setValue(0)
-
-        # Disable sorting during download to keep GUID->row mapping valid
-        self._acquire_table_sort_lock("download")
-
-        # Disable search during download queue processing, enable Cancel
-        self.search_btn.setEnabled(False)
-
-        # Track downloaded title keys for targeted Everything recheck
-        self._downloaded_title_keys = set()
-
-        # Build GUID → row mapping for sort-safe row lookup
-        self._release_key_to_row = {}
-        for item in items:
-            item_guid = self._text_value(item["guid"], "")
-            item_indexer_id = self._int_value(item["indexer_id"], -1)
-            for r in range(self.results_table.rowCount()):
-                btn = self.results_table.cellWidget(r, self.COL_DOWNLOAD)
-                if (
-                    btn
-                    and self._text_value(btn.property("guid"), "") == item_guid
-                    and self._int_value(btn.property("indexerId"), -1)
-                    == item_indexer_id
-                ):
-                    self._release_key_to_row[(item_guid, item_indexer_id)] = r
-                    break
-
-        # Create and start worker
-        try:
-            worker = DownloadWorker(client, items)
-        except Exception as e:
-            logger.error(f"Failed to create download worker: {e}")
-            self._clear_download_queue_ownership()
-            self.status_label.setText(f"Failed to start downloads: {e}")
-            return
-        self.download_worker = worker
-        self._download_queue_owner_since = time.monotonic()
-        self._track_worker(worker)
-        worker.progress.connect(self._download_progress_callback(worker))
-        worker.item_downloaded.connect(self._download_item_callback(worker))
-        worker.queue_done.connect(self._download_done_callback(worker))
-        try:
-            worker.start()
-        except Exception as e:
-            logger.error(f"Failed to start download worker: {e}")
-            self._clear_download_queue_ownership()
-            self.status_label.setText(f"Failed to start downloads: {e}")
-            return
+        self._prepare_new_download_queue(items)
+        self._create_download_worker(client, items)
 
     @safe_slot
     def on_download_progress(
@@ -3359,7 +3608,7 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Downloading {current}/{total} [ {title} ]")
 
     def _find_row_by_release_key(self, guid: str, indexer_id: int) -> int:
-        """Find table row by (guid, indexer_id), using cached mapping first then scanning."""
+        """Find a row by release key, using the cache before scanning."""
         release_key = (guid, indexer_id)
         row = self._release_key_to_row.get(release_key, -1)
         if row >= 0:
@@ -3460,7 +3709,9 @@ class MainWindow(QMainWindow):
                 self._recheck_everything_for_titles(title_keys, gen)
 
             self.log(
-                f"Scheduling Everything recheck in {self.everything_recheck_delay}ms for {len(title_keys)} title groups..."
+                "Scheduling Everything recheck in "
+                f"{self.everything_recheck_delay}ms for "
+                f"{len(title_keys)} title groups..."
             )
             self._schedule_timer(self.everything_recheck_delay, recheck_all_downloaded)
 
@@ -3487,7 +3738,8 @@ class MainWindow(QMainWindow):
                         os.replace(old_file, new_file)
                 os.replace(history_file, f"{history_file}.1")
                 logger.info(
-                    f"Rotated download history log (exceeded {max_size / 1024 / 1024:.1f} MB)"
+                    "Rotated download history log "
+                    f"(exceeded {max_size / 1024 / 1024:.1f} MB)"
                 )
 
             # Append new record (escape tabs/newlines to preserve TSV format)
@@ -3814,6 +4066,134 @@ class MainWindow(QMainWindow):
                 return True
         return super().eventFilter(obj, event)
 
+    def _move_to_next_visible_result_row(self, current_row: int) -> None:
+        """Advance selection to the next visible result row."""
+        next_row = current_row + 1
+        while (
+            next_row < self.results_table.rowCount()
+            and self.results_table.isRowHidden(next_row)
+        ):
+            next_row += 1
+        if next_row < self.results_table.rowCount():
+            self.results_table.setCurrentCell(next_row, self.COL_AGE)
+
+    def _handle_table_download_shortcut(self, event: QKeyEvent) -> bool:
+        """Download the current row and move to the next visible result."""
+        current_row = self.results_table.currentRow()
+        if current_row < 0:
+            return False
+        self.download_release(current_row)
+        self._move_to_next_visible_result_row(current_row)
+        event.accept()
+        return True
+
+    def _handle_everything_launch_shortcut(self, event: QKeyEvent) -> bool:
+        """Launch Everything for the current release title."""
+        if not self.everything:
+            self.status_label.setText("Everything not initialized yet")
+            event.accept()
+            return True
+        title = self.get_current_row_title()
+        if not title:
+            return False
+        self.everything.launch_search(title)
+        self.log(f"Launched Everything search for: {title}")
+        event.accept()
+        return True
+
+    def _handle_copy_title_shortcut(self, event: QKeyEvent) -> bool:
+        """Copy the current release title to the clipboard."""
+        title = self.get_current_row_title()
+        if not title:
+            return False
+        clipboard = QApplication.clipboard()
+        clipboard.setText(title)
+        self.log(f"Copied to clipboard: {title}")
+        self.status_label.setText("Title copied to clipboard")
+        event.accept()
+        return True
+
+    def _handle_web_search_shortcut(self, event: QKeyEvent) -> bool:
+        """Open the configured web search for the current release title."""
+        title = self.get_current_row_title()
+        if not title:
+            return False
+        url = self.web_search_url.replace("{query}", quote(title))
+        webbrowser.open(url)
+        self.log(f"Opened web search for: {title}")
+        event.accept()
+        return True
+
+    def _handle_play_video_shortcut(self, event: QKeyEvent) -> bool:
+        """Open the matched video file for the current row when available."""
+        current_row = self.results_table.currentRow()
+        if current_row < 0:
+            return False
+        video_path = self._get_video_path_for_row(current_row)
+        if video_path:
+            self.log(f"Playing: {video_path}")
+            self.status_label.setText(f"Playing: {os.path.basename(video_path)}")
+            open_path_in_default_app(video_path)
+        else:
+            self.status_label.setText("No video file found in Everything results")
+        event.accept()
+        return True
+
+    def _handle_custom_command_shortcut(
+        self,
+        key: Qt.Key,
+        event: QKeyEvent,
+    ) -> bool:
+        """Run the custom command bound to the pressed key, if any."""
+        if key not in self.custom_commands:
+            return False
+        command = self.custom_commands[key]
+        if command:
+            self._run_custom_command(key, command)
+        else:
+            key_name = {
+                Qt.Key.Key_F2: "F2",
+                Qt.Key.Key_F3: "F3",
+                Qt.Key.Key_F4: "F4",
+            }.get(key, "?")
+            self.status_label.setText(
+                "No custom command configured for "
+                f"{key_name} (set custom_command_{key_name} in config)"
+            )
+        event.accept()
+        return True
+
+    def _handle_select_all_visible_shortcut(self, event: QKeyEvent) -> bool:
+        """Select all currently visible result rows."""
+        selection_model = self.results_table.selectionModel()
+        selection = QItemSelection()
+        col_count = self.results_table.columnCount()
+        model = self.results_table.model()
+        for row in range(self.results_table.rowCount()):
+            if self.results_table.isRowHidden(row):
+                continue
+            top_left = model.index(row, 0)
+            bottom_right = model.index(row, col_count - 1)
+            selection.select(top_left, bottom_right)
+        selection_model.select(
+            selection,
+            QItemSelectionModel.SelectionFlag.ClearAndSelect,
+        )
+        visible = len(selection.indexes()) // max(col_count, 1)
+        self.status_label.setText(f"Selected {visible} visible rows")
+        event.accept()
+        return True
+
+    def _handle_title_group_jump_shortcut(
+        self,
+        forward: bool,
+        event: QKeyEvent,
+    ) -> bool:
+        """Jump to the next or previous title group."""
+        self._jump_title_group(forward=forward)
+        event.accept()
+        return True
+
     def table_key_press(self, event: QKeyEvent) -> None:
         """
         Handle keyboard shortcuts in results table
@@ -3826,117 +4206,26 @@ class MainWindow(QMainWindow):
         key = Qt.Key(event.key())
         modifiers = event.modifiers()
 
-        if key == Qt.Key.Key_Space:
-            # Download current release and move to next visible row
-            current_row = self.results_table.currentRow()
-            if current_row >= 0:
-                self.download_release(current_row)
-                next_row = current_row + 1
-                while (
-                    next_row < self.results_table.rowCount()
-                    and self.results_table.isRowHidden(next_row)
-                ):
-                    next_row += 1
-                if next_row < self.results_table.rowCount():
-                    self.results_table.setCurrentCell(next_row, self.COL_AGE)
-                event.accept()
-                return
-
-        elif key == Qt.Key.Key_S:
-            # Launch Everything.exe with search
-            if self.everything:
-                title = self.get_current_row_title()
-                if title:
-                    self.everything.launch_search(title)
-                    self.log(f"Launched Everything search for: {title}")
-                    event.accept()
-                    return
-            else:
-                self.status_label.setText("Everything not initialized yet")
-                event.accept()
-                return
-
-        elif key == Qt.Key.Key_C:
-            # Copy title to clipboard
-            title = self.get_current_row_title()
-            if title:
-                clipboard = QApplication.clipboard()
-                clipboard.setText(title)
-                self.log(f"Copied to clipboard: {title}")
-                self.status_label.setText("Title copied to clipboard")
-                event.accept()
-                return
-
-        elif key == Qt.Key.Key_G:
-            # Open web search
-            title = self.get_current_row_title()
-            if title:
-                url = self.web_search_url.replace("{query}", quote(title))
-                webbrowser.open(url)
-                self.log(f"Opened web search for: {title}")
-                event.accept()
-                return
-
-        elif key == Qt.Key.Key_P:
-            # Play video file found by Everything
-            current_row = self.results_table.currentRow()
-            if current_row >= 0:
-                video_path = self._get_video_path_for_row(current_row)
-                if video_path:
-                    self.log(f"Playing: {video_path}")
-                    self.status_label.setText(
-                        f"Playing: {os.path.basename(video_path)}"
-                    )
-                    open_path_in_default_app(video_path)
-                else:
-                    self.status_label.setText(
-                        "No video file found in Everything results"
-                    )
-                event.accept()
-                return
-
-        elif key in self.custom_commands:
-            cmd = self.custom_commands[key]
-            if cmd:
-                self._run_custom_command(key, cmd)
-            else:
-                key_name = {
-                    Qt.Key.Key_F2: "F2",
-                    Qt.Key.Key_F3: "F3",
-                    Qt.Key.Key_F4: "F4",
-                }.get(key, "?")
-                self.status_label.setText(
-                    f"No custom command configured for {key_name} (set custom_command_{key_name} in config)"
-                )
-            event.accept()
+        if key == Qt.Key.Key_Space and self._handle_table_download_shortcut(event):
             return
-
-        elif key == Qt.Key.Key_A and modifiers & Qt.KeyboardModifier.ControlModifier:
-            # Select all visible (non-hidden) rows
-            selection_model = self.results_table.selectionModel()
-            selection = QItemSelection()
-            col_count = self.results_table.columnCount()
-            model = self.results_table.model()
-            for row in range(self.results_table.rowCount()):
-                if not self.results_table.isRowHidden(row):
-                    top_left = model.index(row, 0)
-                    bottom_right = model.index(row, col_count - 1)
-                    selection.select(top_left, bottom_right)
-            selection_model.select(
-                selection, QItemSelectionModel.SelectionFlag.ClearAndSelect
+        if key == Qt.Key.Key_S and self._handle_everything_launch_shortcut(event):
+            return
+        if key == Qt.Key.Key_C and self._handle_copy_title_shortcut(event):
+            return
+        if key == Qt.Key.Key_G and self._handle_web_search_shortcut(event):
+            return
+        if key == Qt.Key.Key_P and self._handle_play_video_shortcut(event):
+            return
+        if self._handle_custom_command_shortcut(key, event):
+            return
+        if key == Qt.Key.Key_A and modifiers & Qt.KeyboardModifier.ControlModifier:
+            self._handle_select_all_visible_shortcut(event)
+            return
+        if key == Qt.Key.Key_Tab:
+            self._handle_title_group_jump_shortcut(
+                not bool(modifiers & Qt.KeyboardModifier.ShiftModifier),
+                event,
             )
-            visible = len(selection.indexes()) // max(col_count, 1)
-            self.status_label.setText(f"Selected {visible} visible rows")
-            event.accept()
-            return
-
-        elif key == Qt.Key.Key_Tab:
-            # Jump to next title group
-            if modifiers & Qt.KeyboardModifier.ShiftModifier:
-                self._jump_title_group(forward=False)
-            else:
-                self._jump_title_group(forward=True)
-            event.accept()
             return
 
         # Pass other keys to default handler
@@ -4064,41 +4353,7 @@ class MainWindow(QMainWindow):
         Handle application close event
         Save preferences before exiting
         """
-
-        def _request_interrupt(worker: WorkerThread | None, name: str) -> None:
-            if not worker:
-                return
-            try:
-                worker.requestInterruption()
-            except Exception as e:
-                logger.debug(f"Failed to request interruption for {name}: {e}")
-
-        def _is_running(worker: WorkerThread | None) -> bool:
-            try:
-                return bool(worker and worker.isRunning())
-            except Exception:
-                return False
-
-        def _force_stop(worker: WorkerThread | None, name: str) -> None:
-            if not worker:
-                return
-            # Last-resort stop path: try cooperative cancel first, then terminate.
-            _request_interrupt(worker, name)
-            try:
-                worker.terminate()
-            except Exception as e:
-                logger.debug(f"Failed to terminate {name}: {e}")
-            try:
-                worker.wait(250)
-            except Exception as e:
-                logger.debug(f"Failed forced wait for {name}: {e}")
-
-        tracked_named_workers: list[tuple[str, WorkerThread | None]] = [
-            ("InitWorker", self.init_worker),
-            ("SearchWorker", self.current_worker),
-            ("EverythingCheckWorker", self.everything_check_worker),
-            ("DownloadWorker", self.download_worker),
-        ]
+        tracked_named_workers = self._tracked_named_workers()
         now = time.monotonic()
         force_armed = bool(
             self._shutdown_force_armed_until is not None
@@ -4119,48 +4374,12 @@ class MainWindow(QMainWindow):
             self._shutdown_force_prompted = False
             self._shutdown_interrupted_worker_ids.clear()
 
-        def _interrupt_once_if_running(worker: WorkerThread | None, name: str) -> None:
-            if not _is_running(worker):
-                return
-            worker_id = id(worker)
-            if worker_id in self._shutdown_interrupted_worker_ids:
-                return
-            _request_interrupt(worker, name)
-            self._shutdown_interrupted_worker_ids.add(worker_id)
-
-        # Interrupt currently running workers, including new/replaced workers discovered on retries.
-        for name, worker in tracked_named_workers:
-            _interrupt_once_if_running(worker, name)
-        for worker in self._all_workers:
-            _interrupt_once_if_running(worker, type(worker).__name__)
-
-        seen_workers: set[int] = set()
-        still_running: list[tuple[str, WorkerThread]] = []
         wait_ms = 75 if first_shutdown_attempt else 0
-
-        for name, worker in tracked_named_workers:
-            if not worker:
-                continue
-            seen_workers.add(id(worker))
-            if wait_ms > 0:
-                try:
-                    worker.wait(wait_ms)
-                except Exception as e:
-                    logger.debug(f"Failed lightweight wait for {name}: {e}")
-            if _is_running(worker):
-                still_running.append((name, worker))
-
-        # Include any additional tracked workers not referenced by named fields.
-        for worker in self._all_workers:
-            if not worker or id(worker) in seen_workers:
-                continue
-            if wait_ms > 0:
-                try:
-                    worker.wait(wait_ms)
-                except Exception as e:
-                    logger.debug(f"Failed lightweight wait for tracked worker: {e}")
-            if _is_running(worker):
-                still_running.append((type(worker).__name__, worker))
+        self._interrupt_all_tracked_workers(tracked_named_workers)
+        still_running = self._collect_running_workers_for_close(
+            tracked_named_workers,
+            wait_ms=wait_ms,
+        )
 
         if still_running:
             unique_workers = sorted({name for name, _worker in still_running})
@@ -4172,75 +4391,10 @@ class MainWindow(QMainWindow):
                 self.status_label.setText(wait_msg)
 
             if force_armed:
-                unresolved: list[str] = []
-                force_seen: set[int] = set()
-                for name, worker in still_running:
-                    worker_id = id(worker)
-                    if worker_id in force_seen:
-                        continue
-                    force_seen.add(worker_id)
-                    _force_stop(worker, name)
-                    if _is_running(worker):
-                        unresolved.append(name)
-
-                unresolved = sorted(set(unresolved))
-                if unresolved:
-                    force_msg = (
-                        "Close aborted: workers still running after force-stop attempt: "
-                        + ", ".join(unresolved)
-                    )
-                    logger.error(force_msg)
-                    if hasattr(self, "status_label"):
-                        self.status_label.setText(force_msg)
-                    # Disarm and recover UI so the app does not get stuck in shutdown mode.
-                    self._shutdown_in_progress = False
-                    self._shutdown_started_monotonic = None
-                    self._shutdown_force_prompted = False
-                    self._shutdown_force_armed_until = None
-                    self._shutdown_interrupted_worker_ids.clear()
-                    self.stop_spinner("shutdown")
-                    self._cancel_close_retry_timer()
-                    event.ignore()
+                if self._handle_force_close_workers(still_running, event):
                     return
-            else:
-                self._shutdown_in_progress = True
-                if "shutdown" not in self._active_spinner_tags:
-                    self.start_spinner("shutdown")
-                elapsed = 0.0
-                if self._shutdown_started_monotonic is not None:
-                    elapsed = max(
-                        0.0, time.monotonic() - self._shutdown_started_monotonic
-                    )
-                deadline_hit = elapsed >= self._shutdown_force_after_seconds
-
-                if deadline_hit:
-                    arm_seconds = max(1.0, self._shutdown_force_arm_seconds)
-                    self._shutdown_force_prompted = True
-                    self._shutdown_force_armed_until = time.monotonic() + arm_seconds
-                    prompt = (
-                        f"Background tasks did not stop after {self._shutdown_force_after_seconds:.0f}s. "
-                        f"Close again within {arm_seconds:.0f}s to force stop."
-                    )
-                    logger.error(prompt)
-                    if hasattr(self, "status_label"):
-                        self.status_label.setText(prompt)
-                    # Leave graceful-shutdown mode so normal actions remain usable.
-                    self._shutdown_in_progress = False
-                    self._shutdown_started_monotonic = None
-                    self._shutdown_interrupted_worker_ids.clear()
-                    self.stop_spinner("shutdown")
-                    self._cancel_close_retry_timer()
-                    event.ignore()
-                    return
-
-                if not deadline_hit:
-                    if not self._close_retry_pending:
-                        self._close_retry_pending = True
-                        self._close_retry_timer = self._schedule_timer(
-                            250, self._retry_close
-                        )
-                    event.ignore()
-                    return
+            elif self._handle_graceful_close_wait(event):
+                return
 
         self._shutdown_in_progress = False
         self._shutdown_started_monotonic = None
@@ -4257,7 +4411,8 @@ class MainWindow(QMainWindow):
             self.config_save_timer.stop()
 
         # Stop all pending timers to prevent firing after window closes
-        # Copy list first: a timer's cleanup_wrapper could modify _pending_timers during iteration
+        # Copy the list first because a timer cleanup callback may modify
+        # _pending_timers during iteration.
         timers_snapshot = list(self._pending_timers)
         timer_count = len(timers_snapshot)
         self._pending_timers.clear()

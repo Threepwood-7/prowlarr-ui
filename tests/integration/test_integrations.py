@@ -265,7 +265,9 @@ def main():
         return 0
     else:
         print(
-            f"{Colors.YELLOW}{Colors.BOLD}Some tests failed. Check configuration and service availability.{Colors.RESET}\n"
+            f"{Colors.YELLOW}{Colors.BOLD}Some tests failed. "
+            f"Check configuration and service availability."
+            f"{Colors.RESET}\n"
         )
         return 1
 

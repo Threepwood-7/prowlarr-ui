@@ -10,13 +10,15 @@ HELP_HTML = """\
 <li>Type a search query and press <b>Enter</b> or click <b>Search</b></li>
 <li>Filter by indexer and/or category using the tree views on the left</li>
 <li>Use the page controls to navigate through result pages</li>
-<li>Check <b>Hide existing</b> to hide results already found on disk (via Everything)</li>
+<li>Check <b>Hide existing</b> to hide results already found on disk
+(via Everything)</li>
 </ol>
 
 <h4>Downloading</h4>
 <ul>
 <li><b>Space</b> &ndash; Download selected row and move to next</li>
-<li><b>Download Selected</b> &ndash; Download all highlighted rows (Ctrl+Click to multi-select)</li>
+<li><b>Download Selected</b> &ndash; Download all highlighted rows
+(Ctrl+Click to multi-select)</li>
 <li><b>Download All</b> &ndash; Download all visible (non-hidden) rows</li>
 </ul>
 
@@ -33,7 +35,8 @@ HELP_HTML = """\
 <tr><td><b>Tab</b></td><td>Jump to next title group</td></tr>
 <tr><td><b>Shift+Tab</b></td><td>Jump to previous title group</td></tr>
 <tr><td><b>Ctrl+A</b></td><td>Select all visible rows</td></tr>
-<tr><td><b>Ctrl+F</b></td><td>Find in table (Enter=next, Shift+Enter=prev, Esc=close)</td></tr>
+<tr><td><b>Ctrl+F</b></td><td>Find in table
+(Enter=next, Shift+Enter=prev, Esc=close)</td></tr>
 <tr><td><b>Ctrl+Q / Alt+X</b></td><td>Exit application</td></tr>
 <tr><td><b>F1</b></td><td>Show this help dialog</td></tr>
 <tr><td><b>Double-click</b></td><td>Download row</td></tr>
@@ -62,10 +65,13 @@ After downloading, results are rechecked automatically.</p>
 <ul>
 <li><b>Show Log</b> &ndash; Open the log window to view application messages</li>
 <li><b>Download History</b> &ndash; View the log of previously downloaded items</li>
-<li><b>Select Best per Group</b> &ndash; Highlight the best result in each title group based on size and seeders</li>
-<li><b>Reset Sorting</b> &ndash; Restore default sort order (Title ASC, Indexer DESC, Age ASC)</li>
+<li><b>Select Best per Group</b> &ndash; Highlight the best result in each
+title group based on size and seeders</li>
+<li><b>Reset Sorting</b> &ndash; Restore default sort order
+(Title ASC, Indexer DESC, Age ASC)</li>
 <li><b>Fit Columns</b> &ndash; Resize visible columns to fit their contents</li>
-<li><b>Reset View</b> &ndash; Reset column widths, splitter position, and sort order to defaults</li>
+<li><b>Reset View</b> &ndash; Reset column widths, splitter position,
+and sort order to defaults</li>
 </ul>
 <p><b>Bookmarks</b></p>
 <ul>
@@ -75,7 +81,8 @@ After downloading, results are rechecked automatically.</p>
 </ul>
 <p><b>Tools</b></p>
 <ul>
-<li><b>Edit .ini File</b> &ndash; Open the preferences INI file in your default editor</li>
+<li><b>Edit .ini File</b> &ndash; Open the preferences INI file
+in your default editor</li>
 </ul>
 <p><b>Help</b></p>
 <ul>

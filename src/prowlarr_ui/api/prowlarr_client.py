@@ -53,7 +53,8 @@ class ProwlarrClient:
     def _request_timeout(self) -> float:
         """
         Build a requests timeout value (seconds).
-        Cancellable worker requests use the same timeout so long-running searches can complete.
+        Cancellable worker requests use the same timeout so long-running
+        searches can complete.
         """
         try:
             base = float(self.timeout)
@@ -123,7 +124,9 @@ class ProwlarrClient:
                     response_str = str(response_json)
                     if len(response_str) > 10000:
                         logger.debug(
-                            f"Response body (truncated): {response_str[:10000]}... (total length: {len(response_str)})"
+                            "Response body (truncated): "
+                            f"{response_str[:10000]}... "
+                            f"(total length: {len(response_str)})"
                         )
                     else:
                         logger.debug(f"Response body: {response_json}")
@@ -134,7 +137,8 @@ class ProwlarrClient:
                 if response.status_code >= 500 and attempt < max_attempts:
                     wait = 2**attempt
                     logger.warning(
-                        f"Server error {response.status_code}, retrying in {wait}s (attempt {attempt}/{max_attempts})"
+                        f"Server error {response.status_code}, retrying in {wait}s "
+                        f"(attempt {attempt}/{max_attempts})"
                     )
                     if self._sleep_with_cancel(wait, should_cancel):
                         raise RuntimeError("Prowlarr request cancelled")
@@ -148,7 +152,8 @@ class ProwlarrClient:
                 if attempt < max_attempts:
                     wait = 2**attempt
                     logger.warning(
-                        f"Connection error: {e}, retrying in {wait}s (attempt {attempt}/{max_attempts})"
+                        f"Connection error: {e}, retrying in {wait}s "
+                        f"(attempt {attempt}/{max_attempts})"
                     )
                     if self._sleep_with_cancel(wait, should_cancel):
                         raise RuntimeError("Prowlarr request cancelled") from None

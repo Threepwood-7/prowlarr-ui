@@ -138,7 +138,8 @@ class EverythingSearch:
             self._init_http()
         else:
             logger.warning(
-                f"Unknown Everything integration method '{integration_method}', trying SDK"
+                "Unknown Everything integration method "
+                f"'{integration_method}', trying SDK"
             )
             self._init_sdk()
 

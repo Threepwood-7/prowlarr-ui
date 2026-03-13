@@ -31,7 +31,7 @@ class EverythingCheckWorker(QThread):
     ):
         super().__init__()
         self.everything = everything
-        # Snapshot result ordering so UI-side list mutations can't race worker iteration.
+        # Snapshot result ordering so UI-side mutations cannot race iteration.
         self.results = list(results)
         self.title_match_chars = title_match_chars
         self.everything_search_chars = everything_search_chars
@@ -54,7 +54,8 @@ class EverythingCheckWorker(QThread):
                 title = str(result.get("title", "Unknown") or "Unknown")
 
                 # Search with wildcard pattern
-                # Quote the prefix to prevent Everything interpreting |, !, <, >, () as operators
+                # Quote the prefix so Everything does not treat punctuation
+                # as search operators.
                 prefix = title[: self.everything_search_chars].replace('"', "")
                 search_query = f'"{prefix}"*'
                 everything_results = self.everything.search(
@@ -86,7 +87,7 @@ class EverythingCheckWorker(QThread):
                         self.batch_ready.emit(batch)
                     except Exception as e:
                         logger.error(f"Failed to emit final batch signal: {e}")
-                # Always emit a terminal progress state so UI can display completion accurately.
+                # Emit a terminal progress state so the UI can show completion.
                 try:
                     self.progress.emit(total, total)
                 except Exception as e:
